@@ -1,13 +1,20 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { resolve, dirname } from 'node:path'
+import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
-
-const require = createRequire(import.meta.url)
-const esbuildPath = resolve(import.meta.dirname, '../../dsh-usage-atlas/node_modules/esbuild/lib/main.js')
-const { build } = require(esbuildPath)
 
 const packageRoot = resolve(import.meta.dirname, '..')
 const packageName = 'dsh-tool-normalizer'
+
+let build
+try {
+  const esbuild = await import('esbuild')
+  build = esbuild.build
+} catch {
+  const require = createRequire(import.meta.url)
+  const fallbackPath = resolve(import.meta.dirname, '../../dsh-usage-atlas/node_modules/esbuild/lib/main.js')
+  const esbuild = require(fallbackPath)
+  build = esbuild.build
+}
 
 await mkdir(resolve(packageRoot, 'lib/types/client'), { recursive: true })
 await mkdir(resolve(packageRoot, 'lib/normalizers'), { recursive: true })
@@ -83,9 +90,7 @@ await build({
 })
 
 // 4. Emit type declarations
-const indexDts = `import type { Context } from '@deepseek-ai/cordis'
-
-export interface Config {
+const indexDts = `export interface Config {
   autoWrapRunCode?: boolean
   autoBridgeDirectTools?: boolean
   autoObserveFiles?: boolean
@@ -98,7 +103,7 @@ export declare const inject: {
   required: string[]
   optional: string[]
 }
-export declare function apply(ctx: Context, config?: Config): void
+export declare function apply(ctx: any, config?: Config): void
 declare const _default: {
   name: string
   inject: {
@@ -111,10 +116,8 @@ export default _default
 `
 await writeFile(resolve(packageRoot, 'lib/types/index.d.ts'), indexDts, 'utf-8')
 
-const clientDts = `import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-
-export declare const inject: string[]
-export declare function apply(ctx: ClientContext): void
+const clientDts = `export declare const inject: string[]
+export declare function apply(ctx: any): void
 declare const _default: {
   name: string
   inject: string[]

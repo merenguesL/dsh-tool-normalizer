@@ -1,20 +1,15 @@
 {
-  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "lib"
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node"]
   },
-  "include": [
-    "src",
-    "tests"
-  ],
-  "references": [
-    { "path": "../../vendor/cosmokit" },
-    { "path": "../../vendor/cordis" },
-    { "path": "../../packages/core/tools" },
-    { "path": "../../packages/core/system-prompt" },
-    { "path": "../../packages/core/agent" },
-    { "path": "../../packages/llm/llm" },
-    { "path": "../../packages/core/session" }
-  ]
+  "include": ["src", "tests"]
 }

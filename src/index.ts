@@ -4,14 +4,12 @@
  * @module dsh-tool-normalizer
  */
 
-import type { Context } from '@deepseek-ai/cordis'
-import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { executeBridgeDirectCall, isBridgeableDirectCall } from './normalizers/direct-bridge.ts'
 import { normalizeEditorArguments } from './normalizers/range-clamper.ts'
 import { normalizeRunCodeArguments } from './normalizers/run-code.ts'
 import { registerPromptGuidance } from './prompt.ts'
 import { ToolNormalizerTracker } from './tracker.ts'
-import type { Config } from './types.ts'
+import type { Config, ToolDispatchExecution, ToolExecutionResult } from './types.ts'
 
 export * from './types.ts'
 export * from './tracker.ts'
@@ -35,7 +33,7 @@ export const inject = {
  * @param ctx - Cordis Context.
  * @param userConfig - Plugin configuration.
  */
-export function apply(ctx: Context, userConfig: Config = {}): void {
+export function apply(ctx: any, userConfig: Config = {}): void {
   const config: Required<Config> = {
     autoWrapRunCode: userConfig.autoWrapRunCode ?? true,
     autoBridgeDirectTools: userConfig.autoBridgeDirectTools ?? true,

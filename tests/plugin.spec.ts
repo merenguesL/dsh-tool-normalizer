@@ -1,30 +1,54 @@
-import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
-import type { ToolDispatchExecution } from '@deepseek-ai/dsh-tools'
+
+function createMockContext() {
+  const listeners: Record<string, ((...args: any[]) => any)[]> = {}
+  return {
+    tools: {
+      get: vi.fn(),
+    },
+    systemPrompt: {
+      section: vi.fn(),
+    },
+    on(event: string, fn: (...args: any[]) => any) {
+      if (!listeners[event]) listeners[event] = []
+      listeners[event].push(fn)
+    },
+    async runWaterfall(event: string, exec: any, next: () => Promise<any>) {
+      const handlers = listeners[event] || []
+      if (handlers.length === 0) return next()
+      let index = 0
+      const dispatch = async (): Promise<any> => {
+        if (index < handlers.length) {
+          const handler = handlers[index++]!
+          return handler(exec, dispatch)
+        }
+        return next()
+      }
+      return dispatch()
+    },
+  }
+}
 
 describe('dsh-tool-normalizer plugin', () => {
   it('intercepts run_code calls and auto-fixes command argument', async () => {
-    const ctx = new Context()
-    // Mock tools runtime service
-    ctx.tools = {
-      get: vi.fn().mockReturnValue(undefined),
-    } as any
+    const ctx = createMockContext()
+    ctx.tools.get.mockReturnValue(undefined)
 
-    apply(ctx, { autoWrapRunCode: true })
+    apply(ctx as any, { autoWrapRunCode: true })
 
-    const exec: ToolDispatchExecution = {
+    const exec = {
       name: 'run_code',
       arguments: { command: 'pnpm test' },
-      callId: 'c1' as any,
-      rootCallId: 'c1' as any,
-      token: 'tok' as any,
+      callId: 'c1',
+      rootCallId: 'c1',
+      token: 'tok',
       signal: new AbortController().signal,
     }
 
     const next = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'OK' }], isError: false })
 
-    await ctx.waterfall(ctx, 'tools/execute', exec, next)
+    await ctx.runWaterfall('tools/execute', exec, next)
 
     expect(next).toHaveBeenCalled()
     expect(exec.arguments).toMatchObject({
@@ -34,25 +58,23 @@ describe('dsh-tool-normalizer plugin', () => {
   })
 
   it('normalizes editor path and view ranges', async () => {
-    const ctx = new Context()
-    ctx.tools = {
-      get: vi.fn().mockReturnValue({ name: 'edit' }),
-    } as any
+    const ctx = createMockContext()
+    ctx.tools.get.mockReturnValue({ name: 'edit' })
 
-    apply(ctx, { autoClampRanges: true })
+    apply(ctx as any, { autoClampRanges: true })
 
-    const exec: ToolDispatchExecution = {
+    const exec = {
       name: 'edit',
       arguments: { path: 'relative/file.ts', view_range: [-1, 20] },
-      callId: 'c2' as any,
-      rootCallId: 'c2' as any,
-      token: 'tok' as any,
+      callId: 'c2',
+      rootCallId: 'c2',
+      token: 'tok',
       signal: new AbortController().signal,
     }
 
     const next = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'OK' }], isError: false })
 
-    await ctx.waterfall(ctx, 'tools/execute', exec, next)
+    await ctx.runWaterfall('tools/execute', exec, next)
 
     expect(next).toHaveBeenCalled()
     expect((exec.arguments as any).path).toMatch(/^\//)

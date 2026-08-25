@@ -4,9 +4,6 @@
  * @module dsh-tool-normalizer/types
  */
 
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { ToolExecution } from '@deepseek-ai/dsh-tools'
-
 /**
  * Configuration for the tool normalizer and auto-healing plugin.
  */
@@ -49,3 +46,31 @@ export interface Config {
  * Mutable representation of arguments during normalization.
  */
 export type RawArguments = Record<string, unknown>
+
+/**
+ * Minimal tool runtime contract.
+ */
+export interface ToolRuntime {
+  get(name: string): any
+}
+
+/**
+ * Minimal tool dispatch execution contract.
+ */
+export interface ToolDispatchExecution {
+  name: string
+  arguments: any
+  callId?: string
+  rootCallId?: string
+  token?: string
+  signal?: AbortSignal
+}
+
+/**
+ * Minimal tool execution result contract.
+ */
+export interface ToolExecutionResult {
+  content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
+  isError?: boolean
+  error?: Error | { message: string }
+}

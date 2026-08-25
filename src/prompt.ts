@@ -4,8 +4,6 @@
  * @module dsh-tool-normalizer/prompt
  */
 
-import type { Context } from '@deepseek-ai/cordis'
-
 export const TOOL_NORMALIZER_PROMPT_SECTION = 'tool-normalizer:guidance'
 
 /**
@@ -20,8 +18,8 @@ export const GUIDANCE_TEXT = `## Tool Call Reliability & Best Practices
  * Registers the system prompt guidance section.
  * @param ctx - Cordis Context with `systemPrompt` service.
  */
-export function registerPromptGuidance(ctx: Context): void {
-  if (!ctx.systemPrompt) return
+export function registerPromptGuidance(ctx: any): void {
+  if (!ctx.systemPrompt || typeof ctx.systemPrompt.section !== 'function') return
 
   ctx.systemPrompt.section({
     name: TOOL_NORMALIZER_PROMPT_SECTION,

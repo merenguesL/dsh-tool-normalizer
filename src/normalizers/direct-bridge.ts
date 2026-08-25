@@ -4,7 +4,7 @@
  * @module dsh-tool-normalizer/normalizers/direct-bridge
  */
 
-import type { ToolDispatchExecution, ToolExecutionResult, ToolRuntime } from '@deepseek-ai/dsh-tools'
+import type { ToolDispatchExecution, ToolExecutionResult, ToolRuntime } from '../types.ts'
 
 /** Standard capabilities that can be auto-bridged into Code-Mode. */
 const BRIDGEABLE_TOOLS = new Set([
@@ -38,54 +38,51 @@ export function isBridgeableDirectCall(toolName: string, tools: ToolRuntime): bo
 /**
  * Synthesizes and executes a `run_code` call for a direct tool invocation.
  *
- * @param exec - The direct tool execution.
- * @param tools - Tool runtime registry.
- * @returns The execution result from the synthesized `run_code` call.
+ * @param exec - Direct tool dispatch execution.
+ * @param tools - Tool runtime service.
+ * @returns Synthesized tool execution result.
  */
 export async function executeBridgeDirectCall(
   exec: ToolDispatchExecution,
   tools: ToolRuntime,
 ): Promise<ToolExecutionResult> {
-  const runCodeTool = tools.get('run_code', exec.agent)
-  if (!runCodeTool) {
+  const runCodeTool = tools.get('run_code')
+  if (!runCodeTool || typeof runCodeTool.execute !== 'function') {
     return {
-      content: [{ type: 'text', text: `Error: tool ${JSON.stringify(exec.name)} not found and run_code is unavailable.` }],
+      content: [{
+        type: 'text',
+        text: `Tool '${exec.name}' is not registered, and 'run_code' fallback is unavailable.`,
+      }],
       isError: true,
-      error: { message: `tool ${exec.name} not found`, info: { name: 'ToolNotFoundError', code: 'UNKNOWN_TOOL' } },
     }
   }
 
+  // Synthesize JavaScript snippet for Code-Mode invocation
   const argsJson = JSON.stringify(exec.arguments ?? {})
-  const synthesizedCode = `const result = await tools.${exec.name}(${argsJson});\nreturn result;`
+  const syntheticCode = `const result = await tools.${exec.name}(${argsJson});\nreturn result;`
+
+  const syntheticExec: ToolDispatchExecution = {
+    name: 'run_code',
+    arguments: {
+      description: `[Auto-Bridged] Execute ${exec.name} in Code-Mode`,
+      code: syntheticCode,
+    },
+    callId: exec.callId,
+    rootCallId: exec.rootCallId,
+    token: exec.token,
+    signal: exec.signal,
+  }
 
   try {
-    const rawResult = await runCodeTool.execute(
-      {
-        description: `Auto-bridged direct invocation: ${exec.name}`,
-        code: synthesizedCode,
-      },
-      exec as any,
-    )
-
-    // Render the output if available
-    if (runCodeTool.output?.render) {
-      return {
-        content: runCodeTool.output.render({ description: 'Auto-bridged', code: synthesizedCode }, rawResult),
-        isError: false,
-      }
-    }
-
-    const outputText = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult, null, 2)
-    return {
-      content: [{ type: 'text', text: outputText }],
-      isError: false,
-    }
+    return await runCodeTool.execute(syntheticExec)
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error)
     return {
-      content: [{ type: 'text', text: `Error during bridged ${exec.name} execution: ${message}` }],
+      content: [{
+        type: 'text',
+        text: `Auto-bridged execution of '${exec.name}' failed: ${error instanceof Error ? error.message : String(error)}`,
+      }],
       isError: true,
-      error: { message, info: { name: 'BridgedExecutionError', code: 'CODE_RUN_FAILED' } },
+      error: error instanceof Error ? error : new Error(String(error)),
     }
   }
 }
