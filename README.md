@@ -83,32 +83,49 @@ Detailed root-cause analysis identified four primary structural error drivers:
 
 ---
 
-## 🚀 Installation & Usage
+## 🚀 Installation & Quick Start
 
 In DeepSeek Harness, plugins are managed per composition profile (`web`, `headless`, `tui`, etc.).
 
-### Option A: Install via DSH CLI (Recommended)
+### Step 1: Install Plugin into your Target Profile
+
+Using the `dsh` CLI (or `pnpm dsh` from monorepo root):
 
 ```sh
-# Install into the Web UI profile
+# 1. Install into Web UI profile (Includes Settings Dashboard)
+dsh plugin --profile web add dsh-tool-normalizer
+# (or if running from source repository)
 pnpm dsh plugin --profile web add dsh-tool-normalizer
 
-# Install into the headless profile
-pnpm dsh plugin --profile headless add dsh-tool-normalizer
+# 2. Install into Headless automation profile
+dsh plugin --profile headless add dsh-tool-normalizer
 
-# Install into the TUI profile
-pnpm dsh plugin --profile tui add dsh-tool-normalizer
+# 3. Install into TUI terminal profile
+dsh plugin --profile tui add dsh-tool-normalizer
 ```
 
-### Option B: Local development link
-
+#### Local Development Link (Optional)
+If you are developing or testing local changes:
 ```sh
 pnpm dsh plugin --profile web add ./plugins/dsh-tool-normalizer
 ```
 
-### Option C: Manual `cordis.patch.yml` Mount
+### Step 2: Launch and Verify
 
-Mount it in your workspace's `cordis.patch.yml` or `cordis.yml`:
+```sh
+# Boot Web UI mode
+dsh web
+# (or from source)
+pnpm dsh web
+```
+
+Open your browser, navigate to **Settings (⚙️)** ➔ **Tool Normalizer**, and observe real-time tool execution metrics and auto-healing in action!
+
+---
+
+## ⚙️ Configuration
+
+You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cordis.yml`:
 
 ```yaml
 - insert:
@@ -120,10 +137,6 @@ Mount it in your workspace's `cordis.patch.yml` or `cordis.yml`:
         autoClampRanges: true
         injectPrompt: true
 ```
-
----
-
-## ⚙️ Configuration
 
 | Option | Type | Default | Description |
 | :--- | :---: | :---: | :--- |

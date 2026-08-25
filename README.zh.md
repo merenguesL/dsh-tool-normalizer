@@ -83,32 +83,49 @@
 
 ---
 
-## 🚀 安装与启用
+## 🚀 安装与快速上手
 
 在 DeepSeek Harness 中，插件是按 **组合 Profile**（如 `web`, `headless`, `tui` 等）进行隔离与依赖管理的。
 
-### 方式一：通过 DSH CLI 安装（推荐）
+### 第一步：安装插件至目标 Profile
+
+使用全局 `dsh` 命令（或在源码仓库下使用 `pnpm dsh`）：
 
 ```sh
-# 安装至 Web UI 模式
+# 1. 安装至 Web UI 模式（含设置面板可视化看板）
+dsh plugin --profile web add dsh-tool-normalizer
+# （若在 deepseek-harness 源码仓库下开发调试）
 pnpm dsh plugin --profile web add dsh-tool-normalizer
 
-# 安装至 Headless 自动化模式
-pnpm dsh plugin --profile headless add dsh-tool-normalizer
+# 2. 安装至 Headless 自动化模式
+dsh plugin --profile headless add dsh-tool-normalizer
 
-# 安装至 TUI 终端交互模式
-pnpm dsh plugin --profile tui add dsh-tool-normalizer
+# 3. 安装至 TUI 终端交互模式
+dsh plugin --profile tui add dsh-tool-normalizer
 ```
 
-### 方式二：本地开发模式链接
-
+#### 本地开发模式链接（可选）
+如果你正在本地修改或测试插件源码：
 ```sh
 pnpm dsh plugin --profile web add ./plugins/dsh-tool-normalizer
 ```
 
-### 方式三：手动配置 `cordis.patch.yml`
+### 第二步：启动并查看效果
 
-在工作区的 `cordis.patch.yml` 中挂载：
+```sh
+# 启动 Web 界面
+dsh web
+# （或源码启动）
+pnpm dsh web
+```
+
+打开浏览器进入 Harness 界面，点击左下角 **设置 (⚙️)** ➔ **「工具自愈与统计」**，即可实时查看所有工具调用拦截流水、纠偏统计与成功率图表！
+
+---
+
+## ⚙️ 配置项说明
+
+你可以在工作区的 `cordis.patch.yml` 中自定义插件的运行参数：
 
 ```yaml
 - insert:
@@ -120,10 +137,6 @@ pnpm dsh plugin --profile web add ./plugins/dsh-tool-normalizer
         autoClampRanges: true
         injectPrompt: true
 ```
-
----
-
-## ⚙️ 配置项说明
 
 | 配置字段 | 类型 | 默认值 | 作用说明 |
 | :--- | :---: | :---: | :--- |
