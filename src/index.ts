@@ -21,11 +21,8 @@ export * from './prompt.ts'
 /** Cordis plugin identifier. */
 export const name = 'tool-normalizer'
 
-/** Injected services. */
-export const inject = {
-  required: ['tools'],
-  optional: ['systemPrompt'],
-}
+/** Injected services required from Cordis context. */
+export const inject = ['tools']
 
 /**
  * Applies the tool normalizer and auto-healing plugin.
