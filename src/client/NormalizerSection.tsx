@@ -1,5 +1,5 @@
 /**
- * Statistics and diagnostics UI section for tool-normalizer.
+ * Modern, rich diagnostics and auto-healing UI dashboard for tool-normalizer.
  *
  * @module dsh-tool-normalizer/client/NormalizerSection
  */
@@ -35,10 +35,13 @@ export function NormalizerSection({ injected }: NormalizerSectionProps): React.R
         byCategory: {},
         recentRecords: [],
       },
+      activeTab: 'live',
+      searchQuery: '',
+      statusFilter: 'all',
     }
   })
 
-  const [filter, setFilter] = useState<'all' | 'healed' | 'failed'>('all')
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!controller) return
@@ -49,12 +52,61 @@ export function NormalizerSection({ injected }: NormalizerSectionProps): React.R
     return unsubscribe
   }, [controller])
 
+  const toggleExpand = (id: string): void => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const stats = state.stats
   const filteredRecords = stats.recentRecords.filter((record) => {
-    if (filter === 'healed') return record.wasHealed && record.status === 'success'
-    if (filter === 'failed') return record.status === 'failed'
+    if (state.statusFilter === 'healed' && (!record.wasHealed || record.status !== 'success')) return false
+    if (state.statusFilter === 'failed' && record.status !== 'failed') return false
+    if (state.statusFilter === 'direct' && record.category !== 'UNKNOWN_TOOL') return false
+
+    if (state.searchQuery) {
+      const q = state.searchQuery.toLowerCase()
+      const matchTool = record.toolName.toLowerCase().includes(q)
+      const matchCat = record.category.toLowerCase().includes(q)
+      const matchRaw = (record.originalArgsPreview || '').toLowerCase().includes(q)
+      const matchNorm = (record.normalizedArgsPreview || '').toLowerCase().includes(q)
+      if (!matchTool && !matchCat && !matchRaw && !matchNorm) return false
+    }
+
     return true
   })
+
+  // Format category badge text
+  const formatCategory = (cat: string): string => {
+    switch (cat) {
+      case 'INVALID_ARGS': return t('catInvalidArgs')
+      case 'UNKNOWN_TOOL': return t('catUnknownTool')
+      case 'RANGE_CLAMP': return t('catRangeClamp')
+      case 'CODE_WRAP': return t('catCodeWrap')
+      default: return t('catPassthrough')
+    }
+  }
+
+  // Calculate tool rank max for progress bars
+  const toolEntries = Object.entries(stats.byTool).sort((a, b) => b[1] - a[1])
+  const maxToolCount = toolEntries.length > 0 ? Math.max(...toolEntries.map((e) => e[1])) : 1
+
+  const catEntries = Object.entries(stats.byCategory).sort((a, b) => b[1] - a[1])
+  const maxCatCount = catEntries.length > 0 ? Math.max(...catEntries.map((e) => e[1])) : 1
+
+  // Format time difference
+  const formatTime = (ts: number): string => {
+    const diffSec = Math.floor((Date.now() - ts) / 1000)
+    if (diffSec < 60) return `${diffSec}秒前`
+    const diffMin = Math.floor(diffSec / 60)
+    if (diffMin < 60) return `${diffMin}分钟前`
+    const diffHour = Math.floor(diffMin / 60)
+    if (diffHour < 24) return `${diffHour}小时前`
+    return new Date(ts).toLocaleTimeString()
+  }
 
   return (
     <div className={styles.container}>
@@ -67,170 +119,300 @@ export function NormalizerSection({ injected }: NormalizerSectionProps): React.R
         <div className={styles.headerActions}>
           <button
             type="button"
+            className={styles.btnAccent}
+            onClick={() => controller?.simulateAction()}
+            title="模拟触发一次工具调用异常并测试自愈修复效果"
+          >
+            ⚡ {t('simulate')}
+          </button>
+          <button
+            type="button"
+            className={styles.btnSecondary}
+            onClick={() => controller?.exportReport()}
+          >
+            📥 {t('export')}
+          </button>
+          <button
+            type="button"
             className={styles.btnSecondary}
             onClick={() => controller?.reset()}
           >
-            {t('clear')}
+            🗑️ {t('clear')}
           </button>
           <button
             type="button"
             className={styles.btnPrimary}
             onClick={() => controller?.refresh()}
           >
-            {t('refresh')}
+            🔄 {t('refresh')}
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* Hero KPI Cards */}
       <div className={styles.kpiGrid}>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t('kpiTotal')}</span>
-          <span className={styles.kpiValue}>{stats.totalIntercepted}</span>
+          <span className={styles.kpiTitle}>{t('kpiRate')}</span>
+          <div className={styles.kpiValueRow}>
+            <span className={`${styles.kpiValue} ${styles.kpiValueRate}`}>{stats.healingSuccessRate}%</span>
+          </div>
+          <span className={styles.kpiDesc}>{t('kpiRateDesc')}</span>
         </div>
         <div className={styles.kpiCard}>
           <span className={styles.kpiTitle}>{t('kpiHealed')}</span>
-          <span className={`${styles.kpiValue} ${styles.kpiValueSuccess}`}>{stats.healedSuccess}</span>
+          <div className={styles.kpiValueRow}>
+            <span className={`${styles.kpiValue} ${styles.kpiValueSuccess}`}>{stats.healedSuccess}</span>
+          </div>
+          <span className={styles.kpiDesc}>{t('kpiHealedDesc')}</span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t('kpiRate')}</span>
-          <span className={`${styles.kpiValue} ${styles.kpiValueRate}`}>{stats.healingSuccessRate}%</span>
+          <span className={styles.kpiTitle}>{t('kpiTotal')}</span>
+          <div className={styles.kpiValueRow}>
+            <span className={styles.kpiValue}>{stats.totalIntercepted}</span>
+          </div>
+          <span className={styles.kpiDesc}>{t('kpiTotalDesc')}</span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t('kpiFailed')}</span>
-          <span className={`${styles.kpiValue} ${styles.kpiValueFailed}`}>{stats.healedFailed}</span>
+          <span className={styles.kpiTitle}>{t('kpiSavedRounds')}</span>
+          <div className={styles.kpiValueRow}>
+            <span className={`${styles.kpiValue} ${styles.kpiValueSuccess}`}>~{stats.healedSuccess}</span>
+          </div>
+          <span className={styles.kpiDesc}>{t('kpiSavedRoundsDesc')}</span>
         </div>
       </div>
 
-      {/* Breakdown Grid */}
-      <div className={styles.gridTwoCol}>
-        {/* By Tool */}
-        <div className={styles.breakdownCard}>
-          <h3 className={styles.cardTitle}>{t('toolBreakdown')}</h3>
-          {Object.keys(stats.byTool).length === 0 ? (
-            <div className={styles.emptyState}>{t('noData')}</div>
-          ) : (
-            Object.entries(stats.byTool).map(([toolName, stat]) => {
-              const maxVal = Math.max(...Object.values(stats.byTool).map(s => s.intercepted), 1)
-              const pct = Math.round((stat.intercepted / maxVal) * 100)
-              return (
-                <div key={toolName} className={styles.meterRow}>
-                  <span className={styles.meterLabel} title={toolName}>{toolName}</span>
-                  <div className={styles.meterTrack}>
-                    <div className={styles.meterFill} style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className={styles.meterValue}>
-                    {stat.healed > 0 ? `+${stat.healed} 纠偏 / ` : ''}{stat.intercepted} 次
-                  </span>
-                </div>
-              )
-            })
-          )}
-        </div>
-
-        {/* By Category */}
-        <div className={styles.breakdownCard}>
-          <h3 className={styles.cardTitle}>{t('categoryBreakdown')}</h3>
-          {Object.keys(stats.byCategory).length === 0 ? (
-            <div className={styles.emptyState}>{t('noData')}</div>
-          ) : (
-            Object.entries(stats.byCategory).map(([cat, stat]) => {
-              const maxVal = Math.max(...Object.values(stats.byCategory).map(s => s.count), 1)
-              const pct = Math.round((stat.count / maxVal) * 100)
-              return (
-                <div key={cat} className={styles.meterRow}>
-                  <span className={styles.meterLabel} title={cat}>{cat}</span>
-                  <div className={styles.meterTrack}>
-                    <div className={styles.meterFill} style={{ width: `${pct}%` }} />
-                  </div>
-                  <span className={styles.meterValue}>
-                    {stat.healed} / {stat.count}
-                  </span>
-                </div>
-              )
-            })
-          )}
-        </div>
+      {/* Navigation Tabs */}
+      <div className={styles.tabsBar}>
+        <button
+          type="button"
+          className={`${styles.tabItem} ${state.activeTab === 'live' ? styles.tabActive : ''}`}
+          onClick={() => controller?.setActiveTab('live')}
+        >
+          📋 {t('tabLive')} ({stats.recentRecords.length})
+        </button>
+        <button
+          type="button"
+          className={`${styles.tabItem} ${state.activeTab === 'analytics' ? styles.tabActive : ''}`}
+          onClick={() => controller?.setActiveTab('analytics')}
+        >
+          📊 {t('tabAnalytics')}
+        </button>
+        <button
+          type="button"
+          className={`${styles.tabItem} ${state.activeTab === 'rules' ? styles.tabActive : ''}`}
+          onClick={() => controller?.setActiveTab('rules')}
+        >
+          🛡️ {t('tabRules')}
+        </button>
       </div>
 
-      {/* Records Table */}
-      <div className={styles.section}>
-        <div className={styles.header}>
-          <h3 className={styles.cardTitle}>{t('recentLogs')}</h3>
+      {/* TAB 1: Live Trace */}
+      {state.activeTab === 'live' && (
+        <>
           <div className={styles.filterBar}>
-            <button
-              type="button"
-              className={`${styles.filterBtn} ${filter === 'all' ? styles.filterBtnActive : ''}`}
-              onClick={() => setFilter('all')}
-            >
-              {t('filterAll')}
-            </button>
-            <button
-              type="button"
-              className={`${styles.filterBtn} ${filter === 'healed' ? styles.filterBtnActive : ''}`}
-              onClick={() => setFilter('healed')}
-            >
-              {t('filterHealed')}
-            </button>
-            <button
-              type="button"
-              className={`${styles.filterBtn} ${filter === 'failed' ? styles.filterBtnActive : ''}`}
-              onClick={() => setFilter('failed')}
-            >
-              {t('filterFailed')}
-            </button>
+            <input
+              type="text"
+              className={styles.searchInput}
+              placeholder={t('searchPlaceholder')}
+              value={state.searchQuery}
+              onChange={(e) => controller?.setSearchQuery(e.target.value)}
+            />
+            <div className={styles.filterPills}>
+              <button
+                type="button"
+                className={`${styles.filterPill} ${state.statusFilter === 'all' ? styles.filterPillActive : ''}`}
+                onClick={() => controller?.setStatusFilter('all')}
+              >
+                {t('filterAll')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.filterPill} ${state.statusFilter === 'healed' ? styles.filterPillActive : ''}`}
+                onClick={() => controller?.setStatusFilter('healed')}
+              >
+                {t('filterHealed')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.filterPill} ${state.statusFilter === 'direct' ? styles.filterPillActive : ''}`}
+                onClick={() => controller?.setStatusFilter('direct')}
+              >
+                {t('filterDirect')}
+              </button>
+              <button
+                type="button"
+                className={`${styles.filterPill} ${state.statusFilter === 'failed' ? styles.filterPillActive : ''}`}
+                onClick={() => controller?.setStatusFilter('failed')}
+              >
+                {t('filterFailed')}
+              </button>
+            </div>
+          </div>
+
+          {filteredRecords.length === 0 ? (
+            <div className={styles.emptyBox}>
+              <div className={styles.emptyTitle}>{t('noData')}</div>
+              <p className={styles.emptyDesc}>{t('noDataDesc')}</p>
+            </div>
+          ) : (
+            <div className={styles.traceList}>
+              {filteredRecords.map((record) => {
+                const isExpanded = expandedIds.has(record.id)
+                return (
+                  <div key={record.id} className={styles.traceCard}>
+                    <div className={styles.traceHeader}>
+                      <div className={styles.traceLeft}>
+                        <span className={styles.badgeTool}>{record.toolName}</span>
+                        <span className={styles.badgeCategory}>{formatCategory(record.category)}</span>
+                        {record.status === 'success' && record.wasHealed && (
+                          <span className={styles.badgeSuccess}>✓ {t('statusSuccess')}</span>
+                        )}
+                        {record.status === 'failed' && (
+                          <span className={styles.badgeFailed}>✕ {t('statusFailed')}</span>
+                        )}
+                        <span className={styles.timeText}>{formatTime(record.time)}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.expandBtn}
+                        onClick={() => toggleExpand(record.id)}
+                      >
+                        {isExpanded ? `▲ ${t('hideDetails')}` : `▼ ${t('diffDetails')}`}
+                      </button>
+                    </div>
+
+                    {isExpanded && (
+                      <div className={styles.diffContainer}>
+                        <div className={styles.diffBlock}>
+                          <span className={`${styles.diffLabel} ${styles.labelBefore}`}>
+                            {t('beforeInput')}
+                          </span>
+                          <div className={`${styles.codeBox} ${styles.codeBefore}`}>
+                            {record.originalArgsPreview || '{}'}
+                          </div>
+                        </div>
+                        <div className={styles.diffBlock}>
+                          <span className={`${styles.diffLabel} ${styles.labelAfter}`}>
+                            {t('afterInput')}
+                          </span>
+                          <div className={`${styles.codeBox} ${styles.codeAfter}`}>
+                            {record.normalizedArgsPreview || '（正常放行）'}
+                          </div>
+                        </div>
+                        {record.errorMessage && (
+                          <div style={{ gridColumn: '1 / -1', marginTop: '6px' }}>
+                            <span className={`${styles.diffLabel} ${styles.labelBefore}`}>
+                              {t('errorDetail')}:
+                            </span>
+                            <div className={`${styles.codeBox} ${styles.codeBefore}`} style={{ marginTop: '4px' }}>
+                              {record.errorMessage}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* TAB 2: Analytics & Ranking */}
+      {state.activeTab === 'analytics' && (
+        <div className={styles.analyticsGrid}>
+          {/* Health Callout */}
+          <div className={styles.healthCard}>
+            <span className={styles.healthIcon}>🛡️</span>
+            <div>
+              <div className={styles.healthTitle}>{t('healthScoreTitle')}</div>
+              <p className={styles.healthDesc}>
+                {stats.healingSuccessRate >= 90 ? t('healthGood') : (stats.healingSuccessRate >= 75 ? t('healthFair') : t('healthWarn'))}
+              </p>
+            </div>
+          </div>
+
+          {/* Tool Ranking */}
+          <div className={styles.analyticsCard}>
+            <div className={styles.cardTitle}>{t('toolRankTitle')}</div>
+            <div className={styles.rankList}>
+              {toolEntries.map(([tool, count]) => {
+                const percent = Math.round((count / maxToolCount) * 100)
+                return (
+                  <div key={tool} className={styles.rankItem}>
+                    <div className={styles.rankLabelRow}>
+                      <span className={styles.rankName}>{tool}</span>
+                      <span className={styles.rankValue}>{count} 次</span>
+                    </div>
+                    <div className={styles.progressBarBg}>
+                      <div className={styles.progressBarFill} style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Category Ranking */}
+          <div className={styles.analyticsCard}>
+            <div className={styles.cardTitle}>{t('categoryRankTitle')}</div>
+            <div className={styles.rankList}>
+              {catEntries.map(([cat, count]) => {
+                const percent = Math.round((count / maxCatCount) * 100)
+                return (
+                  <div key={cat} className={styles.rankItem}>
+                    <div className={styles.rankLabelRow}>
+                      <span className={styles.rankName}>{formatCategory(cat)}</span>
+                      <span className={styles.rankValue}>{count} 次</span>
+                    </div>
+                    <div className={styles.progressBarBg}>
+                      <div className={`${styles.progressBarFill} ${styles.progressBarFillEmerald}`} style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
+      )}
 
-        <div className={styles.tableContainer}>
-          {filteredRecords.length === 0 ? (
-            <div className={styles.emptyState}>{t('noData')}</div>
-          ) : (
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>{t('colTime')}</th>
-                  <th>{t('colTool')}</th>
-                  <th>{t('colCategory')}</th>
-                  <th>{t('colStatus')}</th>
-                  <th>{t('colOriginal')}</th>
-                  <th>{t('colNormalized')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRecords.map((r) => (
-                  <tr key={r.id}>
-                    <td>{new Date(r.time).toLocaleTimeString()}</td>
-                    <td><strong>{r.toolName}</strong></td>
-                    <td>{r.category}</td>
-                    <td>
-                      {r.status === 'success' && (
-                        <span className={styles.badgeSuccess}>{t('statusSuccess')}</span>
-                      )}
-                      {r.status === 'failed' && (
-                        <span className={styles.badgeFailed}>{t('statusFailed')}</span>
-                      )}
-                      {r.status === 'passthrough' && (
-                        <span className={styles.badgePassthrough}>{t('statusPassthrough')}</span>
-                      )}
-                    </td>
-                    <td>
-                      <div className={styles.codePreview} title={r.originalArgsPreview}>
-                        {r.originalArgsPreview || '-'}
-                      </div>
-                    </td>
-                    <td>
-                      <div className={styles.codePreview} title={r.normalizedArgsPreview ?? '-'}>
-                        {r.normalizedArgsPreview ?? '-'}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      {/* TAB 3: Rules & Health */}
+      {state.activeTab === 'rules' && (
+        <div className={styles.rulesGrid}>
+          <div className={styles.ruleCard}>
+            <div className={styles.ruleHeader}>
+              <span className={styles.ruleTitle}>{t('rule1Title')}</span>
+              <span className={styles.ruleTag}>✓ {t('statusActive')}</span>
+            </div>
+            <p className={styles.ruleDesc}>{t('rule1Desc')}</p>
+          </div>
+
+          <div className={styles.ruleCard}>
+            <div className={styles.ruleHeader}>
+              <span className={styles.ruleTitle}>{t('rule2Title')}</span>
+              <span className={styles.ruleTag}>✓ {t('statusActive')}</span>
+            </div>
+            <p className={styles.ruleDesc}>{t('rule2Desc')}</p>
+          </div>
+
+          <div className={styles.ruleCard}>
+            <div className={styles.ruleHeader}>
+              <span className={styles.ruleTitle}>{t('rule3Title')}</span>
+              <span className={styles.ruleTag}>✓ {t('statusActive')}</span>
+            </div>
+            <p className={styles.ruleDesc}>{t('rule3Desc')}</p>
+          </div>
+
+          <div className={styles.ruleCard}>
+            <div className={styles.ruleHeader}>
+              <span className={styles.ruleTitle}>{t('rule4Title')}</span>
+              <span className={styles.ruleTag}>✓ {t('statusActive')}</span>
+            </div>
+            <p className={styles.ruleDesc}>{t('rule4Desc')}</p>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
