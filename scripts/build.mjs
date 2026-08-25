@@ -82,7 +82,7 @@ await build({
   sourcemap: false,
   plugins: [await inlineCssModulePlugin()],
   banner: {
-    js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(packageName)}, factory: (require) => {`,
+    js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(packageName)}, factory: (require) => { var module = { exports: {} }; var exports = module.exports;`,
   },
   footer: {
     js: 'return module.exports; } });',
@@ -99,17 +99,11 @@ const indexDts = `export interface Config {
 }
 
 export declare const name: string
-export declare const inject: {
-  required: string[]
-  optional: string[]
-}
+export declare const inject: string[]
 export declare function apply(ctx: any, config?: Config): void
 declare const _default: {
   name: string
-  inject: {
-    required: string[]
-    optional: string[]
-  }
+  inject: string[]
   apply: typeof apply
 }
 export default _default
