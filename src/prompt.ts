@@ -15,13 +15,14 @@ export const GUIDANCE_TEXT = `## Tool Call Reliability & Best Practices
 - Always provide absolute paths for file manipulation tools.`
 
 /**
- * Registers the system prompt guidance section.
- * @param ctx - Cordis Context with `systemPrompt` service.
+ * Registers the system prompt guidance section safely using `ctx.get('systemPrompt')`.
+ * @param ctx - Cordis Context.
  */
 export function registerPromptGuidance(ctx: any): void {
-  if (!ctx.systemPrompt || typeof ctx.systemPrompt.section !== 'function') return
+  const systemPrompt = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : ctx.systemPrompt
+  if (!systemPrompt || typeof systemPrompt.section !== 'function') return
 
-  ctx.systemPrompt.section({
+  systemPrompt.section({
     name: TOOL_NORMALIZER_PROMPT_SECTION,
     order: 400,
     text: GUIDANCE_TEXT,

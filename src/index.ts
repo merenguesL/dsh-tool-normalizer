@@ -41,20 +41,23 @@ export function apply(ctx: any, userConfig: Config = {}): void {
 
   const tracker = ToolNormalizerTracker.getInstance()
 
-  // Register dynamic prompt guidelines if enabled
+  // Register dynamic prompt guidelines safely
   if (config.injectPrompt) {
     registerPromptGuidance(ctx)
   }
+
+  const getTools = () => (typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools)
 
   // Intercept and normalize tool dispatches
   ctx.on('tools/execute', async (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>): Promise<ToolExecutionResult> => {
     const rawArgsStr = JSON.stringify(exec.arguments ?? {})
     const startTime = Date.now()
     const eventId = `norm_${startTime}_${Math.random().toString(36).slice(2, 8)}`
+    const tools = getTools()
 
     // 1. Direct tool to Code-Mode bridging when tool is not registered directly
-    if (config.autoBridgeDirectTools && isBridgeableDirectCall(exec.name, ctx.tools)) {
-      const result = await executeBridgeDirectCall(exec, ctx.tools)
+    if (config.autoBridgeDirectTools && tools && isBridgeableDirectCall(exec.name, tools)) {
+      const result = await executeBridgeDirectCall(exec, tools)
       tracker.record({
         id: eventId,
         time: startTime,
@@ -117,11 +120,13 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     } catch (error: unknown) {
       // If downstream execution failed due to ToolNotFoundError (UNKNOWN_TOOL),
       // attempt fallback bridging to run_code
+      const currentTools = getTools()
       if (
         config.autoBridgeDirectTools
-        && isBridgeableDirectCall(exec.name, ctx.tools)
+        && currentTools
+        && isBridgeableDirectCall(exec.name, currentTools)
       ) {
-        const bridgedResult = await executeBridgeDirectCall(exec, ctx.tools)
+        const bridgedResult = await executeBridgeDirectCall(exec, currentTools)
         tracker.record({
           id: eventId,
           time: startTime,
