@@ -1,0 +1,73 @@
+/**
+ * Localization strings for tool-normalizer client UI.
+ *
+ * @module dsh-tool-normalizer/client/locales
+ */
+
+export const zh = {
+  nav: '工具自愈与统计',
+  title: '工具自愈与运行诊断',
+  subtitle: '实时监控模型 Tool Call 拦截、参数智能纠偏、Code-Mode 透明桥接与错误自愈统计',
+  refresh: '刷新',
+  clear: '清空统计',
+  kpiTotal: '拦截调用总数',
+  kpiHealed: '成功纠偏次数',
+  kpiRate: '纠偏成功率',
+  kpiFailed: '未恢复异常',
+  kpiPass: '正常放行',
+  toolBreakdown: '按工具维度统计',
+  categoryBreakdown: '按问题类别统计',
+  recentLogs: '实时运行与纠正记录',
+  colTime: '时间',
+  colTool: '工具名称',
+  colCategory: '纠偏类别',
+  colStatus: '状态',
+  colOriginal: '原始输入参数',
+  colNormalized: '纠偏后参数/操作',
+  statusSuccess: '纠正成功',
+  statusFailed: '执行失败',
+  statusPassthrough: '正常放行',
+  filterAll: '全部记录',
+  filterHealed: '仅看纠正',
+  filterFailed: '仅看失败',
+  noData: '暂无运行记录',
+  tool: '工具',
+  calls: '调用',
+  heals: '纠正',
+  fails: '失败',
+}
+
+export const en = {
+  nav: 'Tool Normalizer',
+  title: 'Tool Normalizer & Diagnostics',
+  subtitle: 'Real-time monitoring of tool call interceptions, auto-healing, and Code-Mode direct bridging',
+  refresh: 'Refresh',
+  clear: 'Clear Stats',
+  kpiTotal: 'Total Invocations',
+  kpiHealed: 'Auto-Healed',
+  kpiRate: 'Healing Rate',
+  kpiFailed: 'Unrecovered Errors',
+  kpiPass: 'Passthrough',
+  toolBreakdown: 'Statistics by Tool',
+  categoryBreakdown: 'Statistics by Category',
+  recentLogs: 'Execution & Healing Records',
+  colTime: 'Time',
+  colTool: 'Tool',
+  colCategory: 'Category',
+  colStatus: 'Status',
+  colOriginal: 'Original Arguments',
+  colNormalized: 'Normalized Arguments / Action',
+  statusSuccess: 'Healed',
+  statusFailed: 'Failed',
+  statusPassthrough: 'Passthrough',
+  filterAll: 'All Records',
+  filterHealed: 'Healed Only',
+  filterFailed: 'Failed Only',
+  noData: 'No records available',
+  tool: 'Tool',
+  calls: 'Calls',
+  heals: 'Healed',
+  fails: 'Failed',
+}
+
+export type NormalizerKey = keyof typeof zh

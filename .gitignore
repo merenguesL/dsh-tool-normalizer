@@ -1,0 +1,9 @@
+node_modules/
+*.tsbuildinfo
+.vite/
+.vite-temp/
+.DS_Store
+
+# Standalone repository commits installable runtime artifacts
+!lib/
+!lib/**

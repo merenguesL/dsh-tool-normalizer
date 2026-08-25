@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib"
+  },
+  "include": [
+    "src",
+    "tests"
+  ],
+  "references": [
+    { "path": "../../vendor/cosmokit" },
+    { "path": "../../vendor/cordis" },
+    { "path": "../../packages/core/tools" },
+    { "path": "../../packages/core/system-prompt" },
+    { "path": "../../packages/core/agent" },
+    { "path": "../../packages/llm/llm" },
+    { "path": "../../packages/core/session" }
+  ]
+}

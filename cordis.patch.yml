@@ -1,0 +1,4 @@
+# Auto-healing, argument normalization, and Code-Mode direct tool bridging
+- insert:
+    - id: tool-normalizer
+      name: dsh-tool-normalizer
