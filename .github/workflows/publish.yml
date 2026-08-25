@@ -3,6 +3,10 @@ name: Publish to npm
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
 
 jobs:
