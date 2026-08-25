@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import type { NormalizerKey } from './locales.ts'
+import { zh, type NormalizerKey } from './locales.ts'
 import type { NormalizerStore, NormalizerState } from './store.ts'
 import styles from './NormalizerSection.module.css'
 
@@ -20,7 +20,13 @@ export interface NormalizerSectionProps {
 
 export function NormalizerSection({ injected }: NormalizerSectionProps): React.ReactElement {
   const controller = injected?.controller
-  const t = injected?.t ?? ((k: NormalizerKey) => k)
+  const t = (k: NormalizerKey): string => {
+    if (injected?.t) {
+      const v = injected.t(k)
+      if (v && v !== k) return v
+    }
+    return zh[k] || k
+  }
 
   const [state, setState] = useState<NormalizerState>(() => {
     return controller ? controller.getSnapshot() : {

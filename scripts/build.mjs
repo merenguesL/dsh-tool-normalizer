@@ -40,18 +40,21 @@ async function inlineCssModulePlugin() {
     setup(buildApi) {
       buildApi.onLoad({ filter: /\.module\.css$/ }, async (args) => {
         const cssContent = await readFile(args.path, 'utf-8')
-        // Simple CSS module class mapper
+        // Match only class selectors: .className (not decimals like 0.04 or 1.5rem)
         const classNames = {}
-        const matches = cssContent.match(/\.([a-zA-Z0-9_-]+)/g) || []
+        const matches = cssContent.match(/(?<=(?:^|[^\w.-]))\.([a-zA-Z][a-zA-Z0-9_-]*)/g) || []
         for (const m of matches) {
           const name = m.slice(1)
-          classNames[name] = `dsh_tn_${name}`
+          if (!classNames[name]) {
+            classNames[name] = `dsh_tn_${name}`
+          }
         }
         
         // Scope CSS
         let scopedCss = cssContent
         for (const [k, v] of Object.entries(classNames)) {
-          scopedCss = scopedCss.replaceAll(`.${k}`, `.${v}`)
+          const regex = new RegExp(`(?<=(?:^|[^\\w.-]))\\.${k}(?=[^\\w.-]|$)`, 'g')
+          scopedCss = scopedCss.replace(regex, `.${v}`)
         }
 
         const js = `

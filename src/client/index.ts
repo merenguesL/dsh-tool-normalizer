@@ -7,7 +7,7 @@
 
 import { NormalizerSection, type NormalizerSectionInjected } from './NormalizerSection.tsx'
 import { NormalizerStore } from './store.ts'
-import { zh, en, type NormalizerKey } from './locales.ts'
+import { zh, type NormalizerKey } from './locales.ts'
 
 export type { NormalizerSectionInjected, NormalizerSectionProps } from './NormalizerSection.tsx'
 export type { NormalizerKey } from './locales.ts'
@@ -23,11 +23,18 @@ export const inject = ['slots', 'locale']
  * @param ctx - Client root context.
  */
 export function apply(ctx: any): void {
-  // Register localization dictionaries
-  ctx.effect?.(() => ctx.locale?.register(NS, { zh, en }), 'tool-normalizer: copy dictionaries')
+  // Register localization dictionaries (use zh for both zh and en to enforce full Chinese)
+  ctx.effect?.(() => ctx.locale?.register(NS, { zh, en: zh }), 'tool-normalizer: copy dictionaries')
 
   const controller = new NormalizerStore()
-  const t = (ctx.locale?.bind?.(NS) ?? ((k: NormalizerKey) => zh[k] || k)) as NormalizerSectionInjected['t']
+  const boundT = ctx.locale?.bind?.(NS)
+  const t = ((k: NormalizerKey) => {
+    if (boundT) {
+      const v = boundT(k)
+      if (v && v !== k) return v
+    }
+    return zh[k] || k
+  }) as NormalizerSectionInjected['t']
 
   const injected = (): NormalizerSectionInjected => ({
     controller,
@@ -38,7 +45,7 @@ export function apply(ctx: any): void {
     name: 'settings.section',
     id: 'tool-normalizer',
     order: 25,
-    label: () => t('nav'),
+    label: () => zh.nav,
     inject: injected,
   }, NormalizerSection))
 }
