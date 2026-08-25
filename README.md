@@ -83,25 +83,32 @@ Detailed root-cause analysis identified four primary structural error drivers:
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation & Usage
 
-Install via the DSH plugin manager:
+In DeepSeek Harness, plugins are managed per composition profile (`web`, `headless`, `tui`, etc.).
+
+### Option A: Install via DSH CLI (Recommended)
 
 ```sh
-dsh plugin add dsh-tool-normalizer
+# Install into the Web UI profile
+pnpm dsh plugin --profile web add dsh-tool-normalizer
+
+# Install into the headless profile
+pnpm dsh plugin --profile headless add dsh-tool-normalizer
+
+# Install into the TUI profile
+pnpm dsh plugin --profile tui add dsh-tool-normalizer
 ```
 
-Or add it manually to your workspace's `package.json` dependencies:
+### Option B: Local development link
 
-```json
-{
-  "dependencies": {
-    "dsh-tool-normalizer": "^0.1.0"
-  }
-}
+```sh
+pnpm dsh plugin --profile web add ./plugins/dsh-tool-normalizer
 ```
 
-And mount it in your `cordis.patch.yml` or `cordis.yml`:
+### Option C: Manual `cordis.patch.yml` Mount
+
+Mount it in your workspace's `cordis.patch.yml` or `cordis.yml`:
 
 ```yaml
 - insert:
@@ -133,7 +140,7 @@ And mount it in your `cordis.patch.yml` or `cordis.yml`:
 
 1. Set your npm access token as a secret in your GitHub repository:
    - Go to **GitHub Repository Settings ➔ Secrets and variables ➔ Actions ➔ New repository secret**.
-   - Name: `NPM_TOKEN`, Value: `<your-npm-automation-token>`.
+   - Name: `NPM_TOKEN`, Value: `<your-npm-automation-token>` (Ensure 2FA bypass is enabled for write actions).
 2. Bump the version and push a release tag:
    ```sh
    # Bump version (patch / minor / major)

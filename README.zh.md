@@ -85,13 +85,30 @@
 
 ## 🚀 安装与启用
 
-通过 DSH 插件管理器安装：
+在 DeepSeek Harness 中，插件是按 **组合 Profile**（如 `web`, `headless`, `tui` 等）进行隔离与依赖管理的。
+
+### 方式一：通过 DSH CLI 安装（推荐）
 
 ```sh
-dsh plugin add dsh-tool-normalizer
+# 安装至 Web UI 模式
+pnpm dsh plugin --profile web add dsh-tool-normalizer
+
+# 安装至 Headless 自动化模式
+pnpm dsh plugin --profile headless add dsh-tool-normalizer
+
+# 安装至 TUI 终端交互模式
+pnpm dsh plugin --profile tui add dsh-tool-normalizer
 ```
 
-或在工作区的 `cordis.patch.yml` 中挂载：
+### 方式二：本地开发模式链接
+
+```sh
+pnpm dsh plugin --profile web add ./plugins/dsh-tool-normalizer
+```
+
+### 方式三：手动配置 `cordis.patch.yml`
+
+在工作区的 `cordis.patch.yml` 中挂载：
 
 ```yaml
 - insert:
@@ -123,7 +140,7 @@ dsh plugin add dsh-tool-normalizer
 
 1. 在 GitHub 仓库设置中配置 npm Token：
    - 进入 **GitHub 仓库 Settings ➔ Secrets and variables ➔ Actions ➔ New repository secret**。
-   - Secret 名称：`NPM_TOKEN`，值为你的 npm Automation Token。
+   - Secret 名称：`NPM_TOKEN`，值为开启了 2FA Bypass 权限的 npm Token。
 2. 升级版本号并推送 Tag：
    ```sh
    # 升级小版本（patch / minor / major）
