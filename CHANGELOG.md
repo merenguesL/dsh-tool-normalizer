@@ -3,6 +3,13 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-26
+
+### Added
+
+- **Inner-call description injection (INNER_DESC)**: before a \`run_code\` program executes, the listener scans its \`tools.<name>({ ... })\` options objects and inserts a generated description into any that lack one. Inner sub-dispatch validation requires \`description\`, and this failure class was the dominant one in production sessions (4 of 7 failures). The scanner is string/template-aware and bails out conservatively when it cannot parse confidently; the transformation happens pre-execution, so there is no side-effect duplication risk.
+- New \`INNER_DESC\` category surfaces in the dashboard breakdown and locale copy.
+
 ## [0.2.2] - 2026-08-26
 
 ### Fixed

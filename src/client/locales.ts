@@ -42,6 +42,7 @@ export const zh = {
   catUnknownTool: 'Code-Mode 惯性直接调用 (UNKNOWN_TOOL)',
   catRangeClamp: '编辑器边界与相对路径 (RANGE_CLAMP)',
   catCodeWrap: '代码块语法与格式自愈 (CODE_WRAP)',
+  catInnerDesc: '内层调用补全描述 (INNER_DESC)',
   catPassthrough: '正常直通 (PASSTHROUGH)',
 
   // Table & Filters

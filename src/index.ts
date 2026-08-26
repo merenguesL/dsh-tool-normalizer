@@ -5,6 +5,7 @@
  */
 
 import { executeBridgeDirectCall, isBridgeableDirectCall } from './normalizers/direct-bridge.ts'
+import { injectInnerDescriptions } from './normalizers/inner-description.ts'
 import { normalizeEditorArguments } from './normalizers/range-clamper.ts'
 import { normalizeRunCodeArguments } from './normalizers/run-code.ts'
 import { registerPromptGuidance } from './prompt.ts'
@@ -116,7 +117,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     }
 
     let wasHealed = false
-    let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'PASSTHROUGH' = 'PASSTHROUGH'
+    let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'INNER_DESC' | 'PASSTHROUGH' = 'PASSTHROUGH'
     let normalizedPreview: string | undefined
 
     // 2. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
@@ -126,9 +127,23 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       const isMissingDesc = originalObj && !originalObj['description']
       
       const normalized = normalizeRunCodeArguments(exec.arguments)
+
+      // 2b. Preemptive inner-call repair: inject missing descriptions into the
+      // program's tools.*() options objects before execution — inner
+      // sub-dispatch validation requires them and fails the whole program.
+      const codeBody = typeof normalized.code === 'string' ? normalized.code : undefined
+      if (codeBody !== undefined) {
+        const inner = injectInnerDescriptions(codeBody, String(normalized.description ?? ''))
+        if (inner.injected > 0) {
+          normalized.code = inner.code
+          wasHealed = true
+          if (healCategory === 'PASSTHROUGH') healCategory = 'INNER_DESC'
+        }
+      }
+
       if (isCmdPass || isMissingDesc || JSON.stringify(normalized) !== rawArgsStr) {
         wasHealed = true
-        healCategory = isCmdPass ? 'INVALID_ARGS' : 'CODE_WRAP'
+        if (healCategory === 'PASSTHROUGH') healCategory = isCmdPass ? 'INVALID_ARGS' : 'CODE_WRAP'
         normalizedPreview = JSON.stringify(normalized).slice(0, 150)
       }
       exec.arguments = normalized

@@ -54,7 +54,11 @@ describe('dsh-tool-normalizer plugin', () => {
     expect(exec.arguments).toMatchObject({
       description: 'Execute command: pnpm test',
     })
-    expect((exec.arguments as any).code).toContain('await tools.bash({"command":"pnpm test"})')
+    const healedCode = (exec.arguments as any).code as string
+    expect(healedCode).toContain('"command":"pnpm test"')
+    // v0.3.0: inner sub-calls now carry a generated description (required by
+    // sub-dispatch schema validation)
+    expect(healedCode).toContain('description:')
   })
 
   it('normalizes editor path and view ranges', async () => {

@@ -16,7 +16,7 @@ export interface NormalizerRecord {
   id: string
   time: number
   toolName: string
-  category: 'INVALID_ARGS' | 'UNKNOWN_TOOL' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'FS_OBSERVED' | 'PASSTHROUGH'
+  category: 'INVALID_ARGS' | 'UNKNOWN_TOOL' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'INNER_DESC' | 'FS_OBSERVED' | 'PASSTHROUGH'
   wasHealed: boolean
   originalArgsPreview: string
   normalizedArgsPreview?: string

@@ -113,6 +113,7 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
       case 'UNKNOWN_TOOL': return t('catUnknownTool')
       case 'RANGE_CLAMP': return t('catRangeClamp')
       case 'CODE_WRAP': return t('catCodeWrap')
+      case 'INNER_DESC': return t('catInnerDesc')
       case 'PASSTHROUGH': return t('statusPassthrough')
       default: return cat
     }
