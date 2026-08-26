@@ -11,6 +11,7 @@ export const TOOL_NORMALIZER_PROMPT_SECTION = 'tool-normalizer:guidance'
  */
 export const GUIDANCE_TEXT = `## Tool Call Reliability & Best Practices
 - In Code-Mode (when \`run_code\` is provided), write complete executable JavaScript to dispatch tools sequentially via \`await tools.<name>(args)\`. Avoid raw string escaping pitfalls for complex shell scripts by using variables or script files.
+- Inside \`run_code\`, EVERY \`tools.<name>({...})\` call MUST include a short \`description\` string property alongside its other arguments — sub-calls are validated against the full schema and fail without it.
 - Always observe (read) files before editing or replacing text to ensure exact content alignment.
 - Always provide absolute paths for file manipulation tools.`
 

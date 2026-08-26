@@ -27,6 +27,8 @@ export interface NormalizerStats {
   healedSuccess: number
   healedFailed: number
   passThrough: number
+  /** Projected input tokens avoided: healedSuccess × configured retry cost. */
+  estimatedTokensSaved: number
   healingSuccessRate: number // 0 - 100
   /** Per-tool intercepted-call totals; the UI ranks and renders these directly. */
   byTool: Record<string, number>
@@ -45,6 +47,7 @@ export class ToolNormalizerTracker {
   private healedSuccess = 0
   private healedFailed = 0
   private passThrough = 0
+  private estimatedTokensSaved = 0
   private byTool: Record<string, number> = {}
   private byCategory: Record<string, number> = {}
   private records: NormalizerRecord[] = []
@@ -84,6 +87,16 @@ export class ToolNormalizerTracker {
   }
 
   /**
+   * Accumulate the projected token savings for one successfully healed call.
+   * Non-finite or non-positive costs are ignored.
+   */
+  public addEstimatedTokensSaved(cost: number): void {
+    if (Number.isFinite(cost) && cost > 0) {
+      this.estimatedTokensSaved += Math.round(cost)
+    }
+  }
+
+  /**
    * Retrieve the current aggregate statistics snapshot.
    */
   public getSnapshot(): NormalizerStats {
@@ -97,6 +110,7 @@ export class ToolNormalizerTracker {
       healedSuccess: this.healedSuccess,
       healedFailed: this.healedFailed,
       passThrough: this.passThrough,
+      estimatedTokensSaved: this.estimatedTokensSaved,
       healingSuccessRate,
       byTool: { ...this.byTool },
       byCategory: { ...this.byCategory },
@@ -112,6 +126,7 @@ export class ToolNormalizerTracker {
     this.healedSuccess = 0
     this.healedFailed = 0
     this.passThrough = 0
+    this.estimatedTokensSaved = 0
     this.byTool = {}
     this.byCategory = {}
     this.records = []

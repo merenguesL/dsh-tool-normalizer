@@ -28,6 +28,9 @@ export const zh = {
   kpiSavedRoundsDesc: '有效避免的 Agent 中断与 Token 浪费',
   kpiFailed: '未恢复异常',
   kpiFailedDesc: '底层工具执行本身的业务错误',
+  kpiSavedTokens: '预估节省Token',
+  kpiSavedTokensDesc: '自愈次数 × 单次重试估算成本（可在插件配置调整）',
+  estimateBadge: '估算值',
 
   // Status Labels
   statusSuccess: '自愈成功',

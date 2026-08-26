@@ -64,6 +64,9 @@ Detailed root-cause analysis identified four primary structural error drivers:
 - 📐 **Editor Parameter & Bounds Normalization**:
   - Clamps inverted or out-of-bounds `view_range` parameters in `str_replace_editor`.
   - Resolves relative file paths to absolute paths against the session root.
+- 📈 **Projected Token Savings**:
+  - Estimates the input tokens avoided by each successful healing (`healedSuccess × estimatedRetryTokenCost`), shown in the dashboard and the on-disk stats mirror, clearly labeled as an estimate.
+  - Live observability: every interception logs a server-side debug line, and the aggregate snapshot mirrors to \`~/.dsh/tool-normalizer-stats.json\`.
 - 📊 **Web UI Execution & Diagnostics Dashboard**:
   - Embedded directly into DSH's **Settings (`settings.section`)** panel.
   - Displays real-time KPI metrics (Total Interceptions, Auto-Healed Count, Healing Success Rate %, Unrecovered Errors).
@@ -136,6 +139,7 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
         autoBridgeDirectTools: true
         autoClampRanges: true
         injectPrompt: true
+        estimatedRetryTokenCost: 8000
 ```
 
 | Option | Type | Default | Description |
@@ -143,7 +147,8 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
 | `autoWrapRunCode` | `boolean` | `true` | Auto-convert `command` -> `code`, supply missing descriptions, strip Markdown fences. |
 | `autoBridgeDirectTools` | `boolean` | `true` | Bridge direct `bash`/`read`/`write` calls into `run_code` when in Code-Mode. |
 | `autoClampRanges` | `boolean` | `true` | Clamp out-of-bounds `view_range` and resolve relative paths. |
-| `injectPrompt` | `boolean` | `true` | Dynamically register prompt guidelines with `ctx.systemPrompt`. |
+| `injectPrompt` | `boolean` | `true` | Dynamically register prompt guidelines with `ctx.systemPrompt`. Static text only — never breaks prefix caching. |
+| `estimatedRetryTokenCost` | `number` | `8000` | Estimated input tokens of one avoided retry; drives the dashboard's token-savings projection (labeled as an estimate). |
 
 ---
 

@@ -8,6 +8,7 @@ import { executeBridgeDirectCall, isBridgeableDirectCall } from './normalizers/d
 import { normalizeEditorArguments } from './normalizers/range-clamper.ts'
 import { normalizeRunCodeArguments } from './normalizers/run-code.ts'
 import { registerPromptGuidance } from './prompt.ts'
+import { persistSnapshotSoon, statsFilePath } from './stats-file.ts'
 import { ToolNormalizerTracker } from './tracker.ts'
 import type { Config, ToolDispatchExecution, ToolExecutionResult } from './types.ts'
 
@@ -37,9 +38,23 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     autoObserveFiles: userConfig.autoObserveFiles ?? true,
     autoClampRanges: userConfig.autoClampRanges ?? true,
     injectPrompt: userConfig.injectPrompt ?? true,
+    estimatedRetryTokenCost: userConfig.estimatedRetryTokenCost ?? 8000,
   }
 
   const tracker = ToolNormalizerTracker.getInstance()
+
+  /** Record one real event and mirror the aggregate snapshot to disk. */
+  const recordEvent = (record: Parameters<typeof tracker.record>[0]): void => {
+    tracker.record(record)
+    if (record.status === 'success' && record.wasHealed) {
+      tracker.addEstimatedTokensSaved(config.estimatedRetryTokenCost)
+    }
+    persistSnapshotSoon(tracker)
+    ctx.logger?.debug?.(
+      `[tool-normalizer] ${record.toolName} category=${record.category} healed=${record.wasHealed} status=${record.status}`,
+    )
+  }
+  ctx.logger?.info?.(`[tool-normalizer] active — intercepting tools/execute; stats mirror: ${statsFilePath()}`)
 
   // Register dynamic prompt guidelines safely
   if (config.injectPrompt) {
@@ -58,7 +73,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     // 1. Direct tool to Code-Mode bridging when tool is not registered directly
     if (config.autoBridgeDirectTools && tools && isBridgeableDirectCall(exec.name, tools)) {
       const result = await executeBridgeDirectCall(exec, tools)
-      tracker.record({
+      recordEvent({
         id: eventId,
         time: startTime,
         toolName: exec.name,
@@ -105,7 +120,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     // 4. Delegate to the downstream execution pipeline
     try {
       const result = await next()
-      tracker.record({
+      recordEvent({
         id: eventId,
         time: startTime,
         toolName: exec.name,
@@ -127,7 +142,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         && isBridgeableDirectCall(exec.name, currentTools)
       ) {
         const bridgedResult = await executeBridgeDirectCall(exec, currentTools)
-        tracker.record({
+        recordEvent({
           id: eventId,
           time: startTime,
           toolName: exec.name,
@@ -140,7 +155,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         return bridgedResult
       }
 
-      tracker.record({
+      recordEvent({
         id: eventId,
         time: startTime,
         toolName: exec.name,

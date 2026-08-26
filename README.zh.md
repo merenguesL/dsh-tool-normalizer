@@ -136,6 +136,7 @@ pnpm dsh web
         autoBridgeDirectTools: true
         autoClampRanges: true
         injectPrompt: true
+        estimatedRetryTokenCost: 8000
 ```
 
 | 配置字段 | 类型 | 默认值 | 作用说明 |
@@ -143,7 +144,8 @@ pnpm dsh web
 | `autoWrapRunCode` | `boolean` | `true` | 自动转换 `command` 属性为 `code`，自动补全描述，剥离 Markdown 标记 |
 | `autoBridgeDirectTools` | `boolean` | `true` | 在 Code-Mode 下自动将直接工具调用桥接为 `run_code` 执行 |
 | `autoClampRanges` | `boolean` | `true` | 自动收敛编辑器的 `view_range` 并将相对路径转为绝对路径 |
-| `injectPrompt` | `boolean` | `true` | 动态向 `systemPrompt` 注册极简工具最佳实践提示词 |
+| `injectPrompt` | `boolean` | `true` | 动态向 `systemPrompt` 注册极简工具最佳实践提示词（静态文本，不影响前缀缓存命中） |
+| `estimatedRetryTokenCost` | `number` | `8000` | 单次避免失败重试的估算 input token 成本；驱动看板的"预估节省Token"指标（明确标注为估算值） |
 
 ---
 

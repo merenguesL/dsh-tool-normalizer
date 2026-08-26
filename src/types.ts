@@ -40,6 +40,15 @@ export interface Config {
    * @default true
    */
   injectPrompt?: boolean
+
+  /**
+   * Estimated input-token cost of one avoided failed-call retry, used for the
+   * dashboard's token-savings projection (`healedSuccess × cost`). Tune to
+   * the typical conversation length of the deployment; this is an estimate by
+   * design and is labeled as such in the UI.
+   * @default 8000
+   */
+  estimatedRetryTokenCost?: number
 }
 
 /**

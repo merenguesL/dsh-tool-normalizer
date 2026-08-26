@@ -133,8 +133,21 @@
 }
 
 .kpiTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
+}
+
+.estimateBadge {
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .kpiValue {

@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-08-26
+
+### Added
+
+- **Estimated token savings KPI**: the dashboard gains an "预估节省Token" card (`healedSuccess × estimatedRetryTokenCost`), clearly badged as an estimate; the new `estimatedRetryTokenCost` config (default 8000) tunes the per-retry cost to the deployment's typical conversation length. The projection also flows into the on-disk stats mirror.
+- **Inner-call description prevention**: the injected prompt guidance now states that every `tools.*()` call inside `run_code` must carry a `description` — sub-dispatches validate against the full model-facing schema where it is required, and the failure surfaces as a failed outer call. Static text only, so prefix caching is unaffected.
+- **Server-side observability**: plugin activation logs one info line; every interception logs a debug line; the aggregate snapshot mirrors (debounced) to \`$DSH_HOME/tool-normalizer-stats.json\` so real interception counts are inspectable without the browser.
+
 ## [0.1.7] - 2026-08-26
 
 ### Added

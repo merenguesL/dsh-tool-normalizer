@@ -33,6 +33,7 @@ function idleState(): NormalizerState {
       healedSuccess: 0,
       healedFailed: 0,
       passThrough: 0,
+      estimatedTokensSaved: 0,
       healingSuccessRate: 100,
       byTool: {},
       byCategory: {},
@@ -134,6 +135,11 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
 
   const hasData = stats.totalIntercepted > 0
 
+  const formatTokens = (n: number): string =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
+      : n >= 1_000 ? `${(n / 1_000).toFixed(1)}k`
+        : String(n)
+
   const renderRanking = (title: string, entries: Array<[string, number]>, tone: 'accent' | 'success'): React.ReactElement => {
     const max = maxOf(entries)
     return (
@@ -208,6 +214,14 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
           <span className={styles.kpiTitle}>{t('kpiFailed')}</span>
           <span className={`${styles.kpiValue} ${stats.healedFailed > 0 ? styles.kpiValueDanger : ''}`}>{stats.healedFailed}</span>
           <span className={styles.kpiDesc}>{t('kpiFailedDesc')}</span>
+        </div>
+        <div className={styles.kpiCard}>
+          <span className={styles.kpiTitle}>
+            {t('kpiSavedTokens')}
+            <span className={styles.estimateBadge}>{t('estimateBadge')}</span>
+          </span>
+          <span className={`${styles.kpiValue} ${styles.kpiValueSuccess}`}>{formatTokens(stats.estimatedTokensSaved)}</span>
+          <span className={styles.kpiDesc}>{t('kpiSavedTokensDesc')}</span>
         </div>
       </section>
 

@@ -28,6 +28,7 @@ function emptyStats(): NormalizerStats {
     healedSuccess: 0,
     healedFailed: 0,
     passThrough: 0,
+    estimatedTokensSaved: 0,
     healingSuccessRate: 100,
     byTool: {},
     byCategory: {},
@@ -61,6 +62,7 @@ function coerceCounts(source: unknown): CountMap {
 function coerceStats(stats: NormalizerStats): NormalizerStats {
   return {
     ...stats,
+    estimatedTokensSaved: typeof stats.estimatedTokensSaved === 'number' ? stats.estimatedTokensSaved : 0,
     byTool: coerceCounts(stats.byTool),
     byCategory: coerceCounts(stats.byCategory),
   }
