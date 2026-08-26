@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-08-26
+
+### Changed
+
+- **README accuracy fix for the bridge rule's applicability**: direct-tool bridging only applies to deployments that do not register the standard tools (only `run_code`). Under the PTC (`code`) presentation collapse, collapsed tools stay registered and the host deterministically denies direct calls before any listener runs — the rule does not participate there; the host's own denial message routes the model back to `run_code`. Both READMEs now state this scope explicitly.
+
 ## [0.1.8] - 2026-08-26
 
 ### Added

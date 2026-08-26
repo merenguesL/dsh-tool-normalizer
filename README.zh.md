@@ -60,7 +60,8 @@
   - 自动补全缺失或为空的 `description` 字段。
   - 自动剥离误包含的 Markdown 代码块标记（如 ````typescript ... ````）。
 - 🌉 **Code-Mode 透明工具桥接**：
-  - 当 Agent 处于 Code-Mode 时，若模型直接调用了 `bash`、`read`、`write`、`grep`、`edit` 或 `glob`，插件自动在后台将其包装为 `run_code` 子分发执行并回传结果，不再抛出 `UNKNOWN_TOOL`。
+  - 适用于未直接注册标准工具的部署（仅注册了 `run_code`）：模型直调 `bash`、`read`、`write`、`grep`、`edit` 或 `glob` 时，插件自动在后台将其包装为 `run_code` 子分发执行并回传结果，不再抛出 `UNKNOWN_TOOL`。
+  - 适用范围说明：在 PTC（`code`）折叠模式下，被折叠的工具仍处于注册状态，宿主会在任何监听器之前确定性拒绝直调——本规则不参与该路径；宿主自身的拒绝消息会引导模型回到 `run_code`。
 - 📐 **编辑器参数与边界纠偏**：
   - 自动将相对路径转换为基于当前工作区的绝对路径。
   - 自动收敛 `str_replace_editor` 中越界或倒置的 `view_range` 行号范围。

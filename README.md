@@ -60,7 +60,8 @@ Detailed root-cause analysis identified four primary structural error drivers:
   - Fills in missing `description` fields with sensible contextual defaults.
   - Strips accidental Markdown code block fences (e.g. ````typescript ... ````).
 - 🌉 **Code-Mode Direct Tool Bridging**:
-  - When Code-Mode is enabled and the model directly calls `bash`, `read`, `write`, `grep`, `edit`, or `glob`, the plugin transparently synthesizes an internal `run_code` wrapper instead of crashing with `UNKNOWN_TOOL`.
+  - When a deployment does not register the standard tools directly (only `run_code` is registered) and the model calls `bash`, `read`, `write`, `grep`, `edit`, or `glob`, the plugin transparently synthesizes an internal `run_code` wrapper instead of failing with `UNKNOWN_TOOL`.
+  - Scope note: under the PTC (`code`) presentation collapse, collapsed tools stay registered, so the host deterministically denies direct calls **before** any listener runs — this rule does not apply there; the host's own denial message routes the model back to `run_code`.
 - 📐 **Editor Parameter & Bounds Normalization**:
   - Clamps inverted or out-of-bounds `view_range` parameters in `str_replace_editor`.
   - Resolves relative file paths to absolute paths against the session root.
