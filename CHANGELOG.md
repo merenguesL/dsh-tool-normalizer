@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-08-26
+
+### Fixed
+
+- **Schema-aware inner descriptions**: `run_code` only adds an inner `description` when the active target tool schema declares it required, avoiding unnecessary mutations to open schemas such as `read`, `glob`, and `grep`.
+- **Diagnostic diff visibility**: long before/after previews retain both ends and display a bounded summary of the actual changed fields or recovery path.
+- **Token projection accounting**: the configured retry cost is applied to the in-memory tracker as well as the durable summary, so the dashboard no longer reports zero for successful healing attempts.
+
 ## [0.3.2] - 2026-08-26
 
 ### Added

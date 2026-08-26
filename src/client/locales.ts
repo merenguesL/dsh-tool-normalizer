@@ -41,7 +41,8 @@ export const zh = {
   catInvalidArgs: '参数缺失/错位 (INVALID_ARGS)',
   catUnknownTool: '未知工具安全恢复 (UNKNOWN_TOOL)',
   catRangeClamp: '编辑器范围与会话路径 (RANGE_CLAMP)',
-  catCodeWrap: '代码块语法与格式自愈 (CODE_WRAP)',
+  catCodeWrap: '代码围栏清理 (CODE_WRAP)',
+  catRunCodeDesc: 'run_code 描述补全 (RUN_CODE_DESC)',
   catInnerDesc: '内层调用补全描述 (INNER_DESC)',
   catFsObserved: '文件观察后重试 (FS_OBSERVED)',
   catPassthrough: '正常直通 (PASSTHROUGH)',
@@ -61,8 +62,9 @@ export const zh = {
   noDataDesc: '当 Agent 在对话中调用工具时，拦截、纠偏与自愈详情将实时呈现在这里。',
 
   // Diff View
-  beforeInput: '原始输入 (Before)',
-  afterInput: '自愈修复后 (After)',
+  beforeInput: '原始输入预览 (Before)',
+  afterInput: '修复后输入预览 (After)',
+  changeSummary: '实际变更',
   diffDetails: '查看参数差异',
   hideDetails: '收起参数差异',
   errorDetail: '异常报错原因',

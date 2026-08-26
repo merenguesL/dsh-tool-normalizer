@@ -47,6 +47,7 @@ const CATEGORIES = new Set<NormalizerRecord['category']>([
   'UNKNOWN_TOOL',
   'RANGE_CLAMP',
   'CODE_WRAP',
+  'RUN_CODE_DESC',
   'INNER_DESC',
   'FS_OBSERVED',
   'PASSTHROUGH',
@@ -98,6 +99,7 @@ function validRecord(value: unknown): value is NormalizerRecord {
   if (typeof value.originalArgsPreview !== 'string') return false
   if (!STATUSES.has(value.status as NormalizerRecord['status'])) return false
   if (value.normalizedArgsPreview !== undefined && typeof value.normalizedArgsPreview !== 'string') return false
+  if (value.normalizationSummary !== undefined && typeof value.normalizationSummary !== 'string') return false
   if (value.errorMessage !== undefined && typeof value.errorMessage !== 'string') return false
   return true
 }

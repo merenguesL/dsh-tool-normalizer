@@ -7,6 +7,7 @@ describe('ToolNormalizerTracker', () => {
   beforeEach(() => {
     tracker = ToolNormalizerTracker.getInstance()
     tracker.setPersistPassthrough(false)
+    tracker.setRetryTokenCost(0)
     tracker.reset()
   })
 
@@ -95,5 +96,20 @@ describe('ToolNormalizerTracker', () => {
     expect(tracker.getSnapshot().totalIntercepted).toBe(1)
     expect(tracker.getSnapshot().passThrough).toBe(1)
     expect(tracker.getSnapshot().recentRecords).toHaveLength(0)
+  })
+
+  it('projects configured retry token cost for healed calls', () => {
+    tracker.setRetryTokenCost(8000)
+    tracker.record({
+      id: 'e1',
+      time: 1000,
+      toolName: 'run_code',
+      category: 'RUN_CODE_DESC',
+      wasHealed: true,
+      originalArgsPreview: '{}',
+      status: 'success',
+    })
+
+    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(8000)
   })
 })

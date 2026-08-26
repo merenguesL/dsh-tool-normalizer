@@ -12,14 +12,26 @@
 /**
  * A single recorded tool normalization event.
  */
+export type NormalizerCategory =
+  | 'INVALID_ARGS'
+  | 'UNKNOWN_TOOL'
+  | 'RANGE_CLAMP'
+  | 'CODE_WRAP'
+  | 'RUN_CODE_DESC'
+  | 'INNER_DESC'
+  | 'FS_OBSERVED'
+  | 'PASSTHROUGH'
+
 export interface NormalizerRecord {
   id: string
   time: number
   toolName: string
-  category: 'INVALID_ARGS' | 'UNKNOWN_TOOL' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'INNER_DESC' | 'FS_OBSERVED' | 'PASSTHROUGH'
+  category: NormalizerCategory
   wasHealed: boolean
   originalArgsPreview: string
   normalizedArgsPreview?: string
+  /** Short bounded description of the fields or dispatch path that changed. */
+  normalizationSummary?: string
   status: 'success' | 'failed' | 'passthrough'
   errorMessage?: string
 }
@@ -133,7 +145,7 @@ export class ToolNormalizerTracker {
    * Non-finite or non-positive values disable the projection.
    */
   public setRetryTokenCost(cost: number): void {
-    this.retryTokenCost = Number.isFinite(cost) && cost > 0 ? cost : 0
+    this.retryTokenCost = Number.isFinite(cost) && cost > 0 ? Math.round(cost) : 0
   }
 
   /**

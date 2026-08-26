@@ -7,8 +7,9 @@
 import { executeBridgeDirectCall, isBridgeableDirectCall } from './normalizers/direct-bridge.ts'
 import { injectInnerDescriptions } from './normalizers/inner-description.ts'
 import { executeNestedTool, nestedCallId } from './normalizers/nested-dispatch.ts'
+import { compactPreview } from './normalizers/preview.ts'
 import { normalizeEditorArguments } from './normalizers/range-clamper.ts'
-import { normalizeRunCodeArguments } from './normalizers/run-code.ts'
+import { normalizeRunCodeArguments, stripMarkdownFences } from './normalizers/run-code.ts'
 import { registerPromptGuidance } from './prompt.ts'
 import {
   appendEvent,
@@ -39,6 +40,57 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
+}
+
+function includesString(value: unknown, expected: string): boolean {
+  return Array.isArray(value) && value.some(item => item === expected)
+}
+
+function hasOnlyRunCodeFields(value: Record<string, unknown>): boolean {
+  return Object.keys(value).every(key => key === 'code' || key === 'description')
+}
+
+/**
+ * Compare the semantic run_code fields instead of JSON property order.
+ * @param rawArgs - Original model arguments.
+ * @param normalized - Canonical run_code arguments.
+ * @returns True when normalization would not change the accepted fields.
+ */
+function runCodeArgsMatch(
+  rawArgs: unknown,
+  normalized: { code: string; description: string },
+): boolean {
+  const rawObject = objectValue(rawArgs)
+  if (rawObject === undefined || !hasOnlyRunCodeFields(rawObject)) return false
+  if (typeof rawObject['code'] !== 'string' || typeof rawObject['description'] !== 'string') return false
+  return stripMarkdownFences(rawObject['code']) === normalized.code
+    && rawObject['description'].trim() === normalized.description
+}
+
+/**
+ * Read the active tool schema without assuming one particular host version.
+ * Current DSH definitions expose JSON Schema; the legacy property-map form is
+ * accepted only as a compatibility fallback.
+ * @param tools - Active host tool runtime.
+ * @param name - Tool name used by a Code-Mode sub-dispatch.
+ * @param agent - Scope owner for the lookup.
+ * @returns True only when the active definition declares description required.
+ */
+function toolRequiresDescription(tools: NonNullable<ReturnType<typeof getToolRuntime>>, name: string, agent: unknown): boolean {
+  try {
+    const definition = objectValue(tools.get(name, agent))
+    const parameters = objectValue(definition?.['parameters'])
+    if (parameters === undefined) return false
+    if (includesString(parameters['required'], 'description')) return true
+
+    const properties = objectValue(parameters['properties'])
+    if (objectValue(properties?.['description'])?.['required'] === true) return true
+    return objectValue(parameters['description'])?.['required'] === true
+  } catch {
+    // Schema inspection is an optional optimization; never break a call when
+    // a legacy runtime exposes an incompatible definition object.
+    return false
+  }
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -187,6 +239,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
 
   const tracker = ToolNormalizerTracker.getInstance()
   tracker.setPersistPassthrough(config.persistPassthrough)
+  tracker.setRetryTokenCost(config.estimatedRetryTokenCost)
   setRetryTokenCost(config.estimatedRetryTokenCost)
   const restoreReady = restoreFromLog(tracker)
     .catch((error: unknown) => {
@@ -281,35 +334,55 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     const tools = getTools()
 
     let wasHealed = false
-    let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'INNER_DESC' | 'FS_OBSERVED' | 'PASSTHROUGH' = 'PASSTHROUGH'
+    let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'RUN_CODE_DESC' | 'INNER_DESC' | 'FS_OBSERVED' | 'PASSTHROUGH' = 'PASSTHROUGH'
     let normalizedPreview: string | undefined
+    const changes: string[] = []
 
     // 1. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
     if (exec.name === 'run_code' && config.autoWrapRunCode) {
-      const originalObj = exec.arguments as Record<string, unknown> | undefined
-      const isCmdPass = originalObj && ('command' in originalObj || 'cmd' in originalObj)
-      const isMissingDesc = originalObj && !originalObj['description']
+      const originalObj = objectValue(exec.arguments)
+      const isCmdPass = originalObj !== undefined && ('command' in originalObj || 'cmd' in originalObj)
+      const isMissingDesc = originalObj !== undefined
+        && (typeof originalObj['description'] !== 'string' || originalObj['description'].trim().length === 0)
+      const rawCode = typeof originalObj?.['code'] === 'string' ? originalObj['code'] : undefined
+      const hasMarkdownFence = rawCode !== undefined && stripMarkdownFences(rawCode) !== rawCode
       
       const normalized = normalizeRunCodeArguments(exec.arguments)
 
+      const normalizedArgs = JSON.stringify(normalized)
+      const runCodeChanged = !runCodeArgsMatch(exec.arguments, normalized)
+      if (isCmdPass) changes.push('将 command/cmd 转为 run_code.code')
+      if (isMissingDesc) changes.push('补全 run_code.description')
+      if (hasMarkdownFence) changes.push('移除 code 的 Markdown 围栏')
+      if (runCodeChanged && changes.length === 0) changes.push('规范化 run_code 参数')
+      if (runCodeChanged) {
+        wasHealed = true
+        if (isCmdPass) healCategory = 'INVALID_ARGS'
+        else if (hasMarkdownFence) healCategory = 'CODE_WRAP'
+        else if (isMissingDesc) healCategory = 'RUN_CODE_DESC'
+        else healCategory = 'INVALID_ARGS'
+        normalizedPreview = compactPreview(normalizedArgs)
+      }
+
       // 2b. Preemptive inner-call repair: inject missing descriptions into the
-      // program's tools.*() options objects before execution — inner
-      // sub-dispatch validation requires them and fails the whole program.
+      // program's tools.*() options objects before execution, but only for
+      // tools whose active schema declares description as required.
       const codeBody = typeof normalized.code === 'string' ? normalized.code : undefined
       if (codeBody !== undefined) {
-        const inner = injectInnerDescriptions(codeBody, String(normalized.description ?? ''))
+        const inner = injectInnerDescriptions(
+          codeBody,
+          String(normalized.description ?? ''),
+          toolName => tools !== undefined && toolRequiresDescription(tools, toolName, exec.agent),
+        )
         if (inner.injected > 0) {
           normalized.code = inner.code
           wasHealed = true
           if (healCategory === 'PASSTHROUGH') healCategory = 'INNER_DESC'
+          changes.push(`补全内层 description × ${inner.injected}`)
+          normalizedPreview = compactPreview(JSON.stringify(normalized))
         }
       }
 
-      if (isCmdPass || isMissingDesc || JSON.stringify(normalized) !== rawArgsStr) {
-        wasHealed = true
-        if (healCategory === 'PASSTHROUGH') healCategory = isCmdPass ? 'INVALID_ARGS' : 'CODE_WRAP'
-        normalizedPreview = JSON.stringify(normalized).slice(0, 150)
-      }
       exec.arguments = normalized
     }
 
@@ -319,7 +392,8 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       if (JSON.stringify(normalized) !== rawArgsStr) {
         wasHealed = true
         healCategory = 'RANGE_CLAMP'
-        normalizedPreview = JSON.stringify(normalized).slice(0, 150)
+        normalizedPreview = compactPreview(JSON.stringify(normalized))
+        changes.push('按会话目录规范化编辑器路径/范围')
       }
       exec.arguments = normalized
     }
@@ -343,8 +417,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           toolName: exec.name,
           category: 'UNKNOWN_TOOL',
           wasHealed: true,
-          originalArgsPreview: rawArgsStr.slice(0, 150),
+          originalArgsPreview: compactPreview(rawArgsStr),
           normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
+          normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
           status: result.isError ? 'failed' : 'success',
           errorMessage: resultErrorText(result),
         })
@@ -362,6 +437,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           wasHealed = true
           healCategory = 'FS_OBSERVED'
           normalizedPreview = `Read ${editPath(exec.arguments) ?? 'file'} then retry`
+          changes.push('读取目标文件后重试修改')
           result = retried
         }
       }
@@ -372,7 +448,8 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           if (retried !== undefined) {
             wasHealed = true
             healCategory = 'RANGE_CLAMP'
-            normalizedPreview = JSON.stringify(retried.args).slice(0, 150)
+            normalizedPreview = compactPreview(JSON.stringify(retried.args))
+            changes.push(`按文件真实行数修正 view_range（${lineCount} 行）`)
             result = retried.result
           }
         }
@@ -383,8 +460,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         toolName: exec.name,
         category: healCategory,
         wasHealed,
-        originalArgsPreview: rawArgsStr.slice(0, 150),
+        originalArgsPreview: compactPreview(rawArgsStr),
         normalizedArgsPreview: normalizedPreview,
+        normalizationSummary: changes.length > 0 ? changes.join('；') : undefined,
         status: result.isError ? 'failed' : (wasHealed ? 'success' : 'passthrough'),
         errorMessage: resultErrorText(result),
       })
@@ -406,8 +484,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           toolName: exec.name,
           category: 'UNKNOWN_TOOL',
           wasHealed: true,
-          originalArgsPreview: rawArgsStr.slice(0, 150),
+          originalArgsPreview: compactPreview(rawArgsStr),
           normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
+          normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
           status: bridgedResult.isError ? 'failed' : 'success',
           errorMessage: resultErrorText(bridgedResult),
         })
@@ -420,8 +499,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         toolName: exec.name,
         category: healCategory,
         wasHealed,
-        originalArgsPreview: rawArgsStr.slice(0, 150),
+        originalArgsPreview: compactPreview(rawArgsStr),
         normalizedArgsPreview: normalizedPreview,
+        normalizationSummary: changes.length > 0 ? changes.join('；') : undefined,
         status: 'failed',
         errorMessage: errorText(error) ?? String(error),
       })

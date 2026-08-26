@@ -63,7 +63,7 @@ Detailed root-cause analysis identified four primary structural error drivers:
   - When an `UNKNOWN_TOOL` result reaches `tools/execute` and the target is visible in the active agent scope, the plugin re-dispatches it through the host's `tools.execute()` API as a nested call, preserving agent/session ownership, cancellation, contexts, and terminal state.
   - Scope note: under the PTC (`code`) presentation collapse, the host may reject a direct call before any listener runs; a plugin cannot intercept that path. The plugin never invokes a tool definition's `execute()` method directly.
 - 🩹 **Inner-Call Description Injection**:
-  - Before a `run_code` program executes, inserts generated descriptions into its `tools.*()` calls that lack them — inner sub-dispatch validation requires `description`, and missing ones were the dominant production failure class.
+  - Before a `run_code` program executes, inserts a generated description only into a `tools.*()` call whose active tool schema marks `description` as required. Open schemas such as `read`, `glob`, and `grep` are left unchanged.
 - 📐 **Editor Parameter & Bounds Normalization**:
   - Corrects structural and inverted `view_range` values in `str_replace_editor`; when the real error reports a line count, it retries with that bound and preserves the `-1` end-of-file sentinel.
   - Resolves relative file paths to absolute paths against the session working directory.
@@ -72,6 +72,7 @@ Detailed root-cause analysis identified four primary structural error drivers:
 - 📈 **Projected Token Savings**:
   - Estimates the input tokens avoided by each successful healing (`healedSuccess × estimatedRetryTokenCost`), shown in the dashboard, clearly labeled as an estimate.
   - Live observability: every interception updates aggregate counters. Healing attempts and failures append detailed JSONL events to `~/.dsh/tool-normalizer-events.jsonl`; successful untouched pass-through calls are aggregated in `tool-normalizer-summary.json` by default instead of expanding the detail log.
+  - Diagnostic previews keep both the beginning and end of long arguments and include a bounded summary of the fields or dispatch path that changed.
   - The dashboard reads live data from the same-origin feed `GET /plugin-api/tool-normalizer/stats`, registered by the node half when a webserver is present.
 - 📊 **Web UI Execution & Diagnostics Dashboard**:
   - Embedded directly into DSH's **Settings (`settings.section`)** panel.

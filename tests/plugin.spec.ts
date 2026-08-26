@@ -1,5 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../src/index.ts'
+import { ToolNormalizerTracker } from '../src/tracker.ts'
+
+const tracker = ToolNormalizerTracker.getInstance()
+
+beforeEach(() => {
+  tracker.reset()
+})
 
 function createMockContext() {
   const listeners: Record<string, ((...args: any[]) => any)[]> = {}
@@ -34,7 +41,9 @@ function createMockContext() {
 describe('dsh-tool-normalizer plugin', () => {
   it('intercepts run_code calls and auto-fixes command argument', async () => {
     const ctx = createMockContext()
-    ctx.tools.get.mockReturnValue(undefined)
+    ctx.tools.get.mockImplementation((name: string) => name === 'bash'
+      ? { name, parameters: { type: 'object', required: ['command', 'description'] } }
+      : undefined)
 
     apply(ctx as any, { autoWrapRunCode: true })
 
@@ -57,9 +66,87 @@ describe('dsh-tool-normalizer plugin', () => {
     })
     const healedCode = (exec.arguments as any).code as string
     expect(healedCode).toContain('"command":"pnpm test"')
-    // v0.3.0: inner sub-calls now carry a generated description (required by
-    // sub-dispatch schema validation)
+    // bash declares description as required, so the generated sub-dispatch
+    // receives the missing field as well.
     expect(healedCode).toContain('description:')
+    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(8000)
+  })
+
+  it('injects inner descriptions only for tools whose active schema requires them', async () => {
+    const ctx = createMockContext()
+    ctx.tools.get.mockImplementation((name: string) => {
+      if (name === 'bash') return { name, parameters: { type: 'object', required: ['command', 'description'] } }
+      if (name === 'read') return { name, parameters: { type: 'object', required: ['file_path'] } }
+      return undefined
+    })
+
+    apply(ctx as any, { autoWrapRunCode: true })
+
+    const exec = {
+      name: 'run_code',
+      arguments: {
+        code: 'const a = await tools.read({ file_path: "notes.md" }); const b = await tools.bash({ command: "pwd" });',
+        description: 'Inspect files',
+      },
+      callId: 'schema-1',
+      rootCallId: 'schema-1',
+      token: 'tok',
+      signal: new AbortController().signal,
+    }
+    const next = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'OK' }], isError: false })
+
+    await ctx.runWaterfall('tools/execute', exec, next)
+
+    const healedCode = (exec.arguments as { code: string }).code
+    expect(healedCode).toContain('tools.read({ file_path: "notes.md" })')
+    expect(healedCode).toContain('tools.bash({ description: "Inspect files · bash", command: "pwd" })')
+    expect(tracker.getSnapshot().recentRecords[0]?.normalizationSummary).toBe('补全内层 description × 1')
+  })
+
+  it('records the changed tail when a long run_code description is added', async () => {
+    const ctx = createMockContext()
+    ctx.tools.get.mockReturnValue(undefined)
+    apply(ctx as any, { autoWrapRunCode: true })
+
+    const exec = {
+      name: 'run_code',
+      arguments: { code: `const value = "${'x'.repeat(300)}"; return value;` },
+      callId: 'preview-1',
+      rootCallId: 'preview-1',
+      token: 'tok',
+      signal: new AbortController().signal,
+    }
+    const next = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'OK' }], isError: false })
+
+    await ctx.runWaterfall('tools/execute', exec, next)
+
+    const record = tracker.getSnapshot().recentRecords[0]
+    expect(record?.category).toBe('RUN_CODE_DESC')
+    expect(record?.normalizationSummary).toContain('补全 run_code.description')
+    expect(record?.normalizedArgsPreview).toContain('Execute code script')
+    expect(record?.originalArgsPreview).not.toContain('Execute code script')
+  })
+
+  it('does not count a canonical run_code call as healed just because field order differs', async () => {
+    const ctx = createMockContext()
+    ctx.tools.get.mockReturnValue(undefined)
+    apply(ctx as any, { autoWrapRunCode: true })
+
+    const exec = {
+      name: 'run_code',
+      arguments: { description: 'Return a value', code: 'return 1;' },
+      callId: 'canonical-1',
+      rootCallId: 'canonical-1',
+      token: 'tok',
+      signal: new AbortController().signal,
+    }
+    const next = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: 'OK' }], isError: false })
+
+    await ctx.runWaterfall('tools/execute', exec, next)
+
+    expect(tracker.getSnapshot().healedSuccess).toBe(0)
+    expect(tracker.getSnapshot().passThrough).toBe(1)
+    expect(tracker.getSnapshot().recentRecords).toHaveLength(0)
   })
 
   it('normalizes editor path and view ranges', async () => {

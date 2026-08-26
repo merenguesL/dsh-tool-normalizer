@@ -1,12 +1,12 @@
 /**
  * Preemptive repair for Code-Mode inner-call schema failures.
  *
- * Sub-dispatches inside run_code validate against the full model-facing tool
- * schema, where description is required; a program whose tools.*() calls omit
- * it fails before any listener can help. This pass recognizes only literal
- * object arguments and uses a small lexical scanner so strings, templates,
- * comments, regular expressions, nested objects, spreads, and computed keys
- * are not mistaken for missing properties.
+ * Some sub-dispatches inside run_code validate required `description` fields
+ * before their tool body runs; a program that omits one fails before a later
+ * listener can help. This pass recognizes only literal object arguments and
+ * uses a small lexical scanner so strings, templates, comments, regular
+ * expressions, nested objects, spreads, and computed keys are not mistaken
+ * for missing properties.
  *
  * @module dsh-tool-normalizer/normalizers/inner-description
  */
@@ -178,8 +178,9 @@ function quotedKey(code: string, start: number, end: number): { key: string | un
 
 /**
  * Determine whether an object literal already supplies or may supply
- * `description`. Spreads and computed keys are treated as present/unknown so
- * the normalizer never creates a duplicate property that changes semantics.
+ * `description` when the caller's schema predicate says it is required.
+ * Spreads and computed keys are treated as present/unknown so the normalizer
+ * never creates a duplicate property that changes semantics.
  */
 function hasDescriptionProperty(code: string, open: number, close: number): boolean {
   let depth = 0
@@ -243,19 +244,25 @@ function hasDescriptionProperty(code: string, open: number, close: number): bool
 
 const CALL_SHAPE = /^tools\.([A-Za-z_$][\w$]*)\s*\(\s*\{/u
 
+/** Decide whether one target tool's schema requires a generated description. */
+export type DescriptionRequirement = (toolName: string) => boolean
+
 /**
- * Insert a generated description into every tools.<name>({ ... }) options
- * object whose literal lacks one. String/template/comment contents are never
- * rewritten. Returns the rewritten program and insertion count; injected: 0
- * means the program needed no change or could not be scanned safely.
+ * Insert a generated description into each selected `tools.<name>({ ... })`
+ * options object whose literal lacks one. String/template/comment contents are
+ * never rewritten. Returns the rewritten program and insertion count;
+ * injected: 0 means the program needed no change or could not be scanned
+ * safely.
  *
  * @param code - Code-Mode program source.
  * @param outerDescription - Description of the enclosing run_code call.
+ * @param requiresDescription - Schema-aware predicate for the target tool.
  * @returns Rewritten source and number of inserted properties.
  */
 export function injectInnerDescriptions(
   code: string,
   outerDescription: string,
+  requiresDescription: DescriptionRequirement = () => true,
 ): { code: string; injected: number } {
   const out: string[] = []
   let i = 0
@@ -290,7 +297,7 @@ export function injectInnerDescriptions(
         const open = i + match[0].length - 1
         const close = findObjectEnd(code, open)
         if (close < 0) return { code, injected: 0 }
-        if (hasDescriptionProperty(code, open, close)) {
+        if (hasDescriptionProperty(code, open, close) || !requiresDescription(match[1])) {
           out.push(code.slice(i, close + 1))
         } else {
           const base = String(outerDescription || 'inner call') + ' · ' + match[1]

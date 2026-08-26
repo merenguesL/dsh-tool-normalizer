@@ -371,6 +371,26 @@
   padding: 0 14px 12px;
 }
 
+.changeSummary {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-left: 3px solid var(--dsw-alias-brand-primary);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.changeSummaryLabel {
+  flex-shrink: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-weight: 600;
+}
+
 .errorBlock {
   grid-column: 1 / -1;
   display: flex;

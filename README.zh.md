@@ -59,6 +59,7 @@
   - 自动识别并转换 `{"command": "git status"}` / `{"cmd": "..."}` 为标准的 `run_code` JavaScript 调用。
   - 自动补全缺失或为空的 `description` 字段。
   - 自动剥离误包含的 Markdown 代码块标记（如 ````typescript ... ````）。
+  - 仅当内层目标工具的当前 schema 将 `description` 标记为必填时才补全；`read`、`glob`、`grep` 等开放参数工具保持原始参数不变。
 - 🌉 **Code-Mode 透明工具桥接**：
   - 当 `UNKNOWN_TOOL` 已经进入 `tools/execute` 且目标工具在当前 Agent 作用域中可见时，插件通过宿主的 `tools.execute()` 重新以嵌套调用派发，保留 Agent、会话、取消信号、上下文和终结状态。
   - 适用范围说明：在 PTC（`code`）折叠模式下，宿主可能在任何监听器之前拒绝直调；这条路径插件无法仅靠自身拦截。插件也不会直接调用工具定义的 `execute()` 方法。
@@ -155,6 +156,8 @@ pnpm dsh web
 | `persistPassthrough` | `boolean` | `false` | 是否将未修改且成功的正常放行调用逐条写入 JSONL；默认仅保留聚合计数，失败和自愈事件仍保留明细 |
 
 成功率只计算实际发生修复/恢复尝试的调用：`healedSuccess / (healedSuccess + healedFailed)`。正常成功放行不会进入详细 JSONL，以避免日志被高频健康调用淹没；其计数写入同目录的 `tool-normalizer-summary.json`。
+
+流水明细对长参数只保留首尾预览，并额外显示实际修改的字段或恢复路径，避免新增字段位于截断区域时看起来没有变化。
 
 ---
 

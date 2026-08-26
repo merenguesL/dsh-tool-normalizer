@@ -103,7 +103,8 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
       const matchCat = record.category.toLowerCase().includes(q)
       const matchRaw = (record.originalArgsPreview || '').toLowerCase().includes(q)
       const matchNorm = (record.normalizedArgsPreview || '').toLowerCase().includes(q)
-      if (!matchTool && !matchCat && !matchRaw && !matchNorm) return false
+      const matchSummary = (record.normalizationSummary || '').toLowerCase().includes(q)
+      if (!matchTool && !matchCat && !matchRaw && !matchNorm && !matchSummary) return false
     }
     return true
   }), [stats.recentRecords, state.statusFilter, state.searchQuery])
@@ -114,6 +115,7 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
       case 'UNKNOWN_TOOL': return t('catUnknownTool')
       case 'RANGE_CLAMP': return t('catRangeClamp')
       case 'CODE_WRAP': return t('catCodeWrap')
+      case 'RUN_CODE_DESC': return t('catRunCodeDesc')
       case 'INNER_DESC': return t('catInnerDesc')
       case 'FS_OBSERVED': return t('catFsObserved')
       case 'PASSTHROUGH': return t('statusPassthrough')
@@ -338,6 +340,12 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
 
                         {isExpanded && (
                           <div className={styles.diffGrid}>
+                            {record.normalizationSummary && (
+                              <div className={styles.changeSummary}>
+                                <span className={styles.changeSummaryLabel}>{t('changeSummary')}</span>
+                                <span>{record.normalizationSummary}</span>
+                              </div>
+                            )}
                             <div className={styles.diffBlock}>
                               <div className={styles.diffLabelRow}>
                                 <span className={`${styles.diffLabel} ${styles.diffLabelBefore}`}>{t('beforeInput')}</span>

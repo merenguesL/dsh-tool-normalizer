@@ -79,4 +79,11 @@ describe('injectInnerDescriptions', () => {
     expect(res.injected).toBe(1)
     expect(res.code).toContain('description: "Inspect · bash"')
   })
+
+  it('skips tools whose schema does not require description', () => {
+    const code = 'await tools.read({ file_path: "notes.md" })'
+    const res = injectInnerDescriptions(code, 'Inspect', () => false)
+    expect(res.injected).toBe(0)
+    expect(res.code).toBe(code)
+  })
 })
