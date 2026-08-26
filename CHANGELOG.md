@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-08-26
+
+### Fixed
+
+- **v0.3.0 injection bug (breaking)**: the inner-description pass spliced the generated property at the wrong position (between `(` and `{`) — every healed call became a JS syntax error (`Expected ',', got ':'`). Rewritten as a linear state-machine scanner that skips string, template, and comment contexts; a `tools.*({` shape inside a string literal is data and is never rewritten. The insertion now lands inside the braces. Scanner aborts conservatively when it cannot parse with confidence.
+
 ## [0.3.0] - 2026-08-26
 
 ### Added
