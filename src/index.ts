@@ -56,10 +56,22 @@ export function apply(ctx: any, userConfig: Config = {}): void {
   ctx.logger?.info?.(`[tool-normalizer] active — intercepting tools/execute; history log: ${statsLogPath()}`)
 
   // Optional HTTP feed for the browser dashboard: same-origin GET returning
-  // the live in-memory snapshot. Optional-service discipline: resolved via
-  // ctx.get so deployments without a webserver load fine without the feed.
-  const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : ctx.webServer
-  if (webServer && typeof webServer.register === 'function') {
+  // the live in-memory snapshot. Activation order is unconstrained, so the
+  // webserver service may mount after this plugin: poll briefly instead of
+  // giving up on the first ctx.get miss. Never declared as inject — a
+  // CLI-only profile without any webserver must still load.
+  let registerAttempts = 0
+  const tryRegisterStatsRoute = (): void => {
+    const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : ctx.webServer
+    if (!webServer || typeof webServer.register !== 'function') {
+      if (registerAttempts++ < 60) {
+        const timer = setTimeout(tryRegisterStatsRoute, 1000)
+        timer.unref?.()
+      } else {
+        ctx.logger?.warn?.('[tool-normalizer] no webserver appeared within 60s; stats feed disabled')
+      }
+      return
+    }
     ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/plugin-api/tool-normalizer/stats',
@@ -70,6 +82,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     }), 'tool-normalizer: stats http route')
     ctx.logger?.info?.('[tool-normalizer] stats feed at GET /plugin-api/tool-normalizer/stats')
   }
+  tryRegisterStatsRoute()
 
   // Register dynamic prompt guidelines safely
   if (config.injectPrompt) {

@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-26
+
+### Fixed
+
+- **Stats feed 404 under activation-order races**: the plugin resolved the webserver service exactly once at apply time, before the webserver plugin had mounted in some boot orders, so the stats route never registered and the dashboard polled a 404 forever. Registration now polls for up to 60s (1s interval) and logs a warning if no webserver ever appears; deployments without one are unaffected.
+
 ## [0.2.0] - 2026-08-26
 
 ### Added
