@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-26
+
+### Fixed
+
+- **Test runs no longer contaminate the production statistics log**: the plugin's own vitest invocations were appending fixture events to \`~/.dsh/tool-normalizer-events.jsonl\`, permanently inflating healed counts and the token-savings projection with every test run. Log appends are now skipped when VITEST or NODE_ENV=test is detected (in-memory tracking still works for assertions).
+
 ## [0.2.1] - 2026-08-26
 
 ### Fixed

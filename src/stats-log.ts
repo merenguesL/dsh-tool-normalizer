@@ -78,8 +78,19 @@ export async function restoreFromLog(tracker: ToolNormalizerTracker): Promise<vo
   })
 }
 
+/**
+ * True inside the plugin's own unit-test runs (vitest sets VITEST; some CI
+ * runners only set NODE_ENV). Test fixtures must never contaminate the
+ * production statistics log — every vitest invocation would otherwise add
+ * fake healed events and inflate the token-savings projection forever.
+ */
+function isTestRun(): boolean {
+  return process.env['VITEST'] !== undefined || process.env['NODE_ENV'] === 'test'
+}
+
 /** Append one event line; flush errors never break tool execution. */
 export function appendEvent(record: NormalizerRecord): void {
+  if (isTestRun()) return
   void mkdir(join(statsLogPath(), '..'), { recursive: true })
     .then(() => appendFile(statsLogPath(), JSON.stringify(record) + '\n'))
     .catch(() => {
