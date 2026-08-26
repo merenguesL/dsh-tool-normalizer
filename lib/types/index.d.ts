@@ -4,6 +4,8 @@ export interface Config {
   autoObserveFiles?: boolean
   autoClampRanges?: boolean
   injectPrompt?: boolean
+  estimatedRetryTokenCost?: number
+  persistPassthrough?: boolean
 }
 
 export declare const name: string

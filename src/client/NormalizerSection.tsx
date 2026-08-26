@@ -33,8 +33,9 @@ function idleState(): NormalizerState {
       healedSuccess: 0,
       healedFailed: 0,
       passThrough: 0,
+      passThroughFailed: 0,
       estimatedTokensSaved: 0,
-      healingSuccessRate: 100,
+      healingSuccessRate: 0,
       byTool: {},
       byCategory: {},
       recentRecords: [],
@@ -114,6 +115,7 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
       case 'RANGE_CLAMP': return t('catRangeClamp')
       case 'CODE_WRAP': return t('catCodeWrap')
       case 'INNER_DESC': return t('catInnerDesc')
+      case 'FS_OBSERVED': return t('catFsObserved')
       case 'PASSTHROUGH': return t('statusPassthrough')
       default: return cat
     }
@@ -213,7 +215,7 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
         </div>
         <div className={styles.kpiCard}>
           <span className={styles.kpiTitle}>{t('kpiFailed')}</span>
-          <span className={`${styles.kpiValue} ${stats.healedFailed > 0 ? styles.kpiValueDanger : ''}`}>{stats.healedFailed}</span>
+          <span className={`${styles.kpiValue} ${stats.healedFailed + stats.passThroughFailed > 0 ? styles.kpiValueDanger : ''}`}>{stats.healedFailed + stats.passThroughFailed}</span>
           <span className={styles.kpiDesc}>{t('kpiFailedDesc')}</span>
         </div>
         <div className={styles.kpiCard}>
@@ -404,7 +406,7 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
       {/* TAB: rules */}
       {state.activeTab === 'rules' && (
         <section className={styles.rulesGrid}>
-          {([1, 2, 3, 4] as const).map((n) => (
+          {([1, 2, 3, 4, 5] as const).map((n) => (
             <article key={n} className={styles.ruleCard}>
               <div className={styles.ruleHead}>
                 <h3 className={styles.ruleTitle}>{t(`rule${n}Title` as NormalizerKey)}</h3>

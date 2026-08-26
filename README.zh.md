@@ -30,7 +30,7 @@
 
 ## 🎯 `dsh-tool-normalizer` 想解决的问题
 
-本插件基于 Cordis 的 `tools/execute` 瀑布流扩展点构建，作为零开销、确定性的前置中间件对模型生成的工具调用进行自动纠偏与自愈，并配套提供完整的 Web UI 诊断与统计看板：
+本插件基于 Cordis 的 `tools/execute` 瀑布流扩展点构建，作为低开销、确定性的前置中间件对模型生成的工具调用进行自动纠偏与自愈，并配套提供 Web UI 诊断与统计看板：
 
 ```
        模型发起的 Tool Call
@@ -40,14 +40,14 @@
    │             dsh-tool-normalizer 插件                   │
    │                                                        │
    │  1. run_code 自动归一化 (command ➔ code, 补全描述)       │
-   │  2. 直接调用透明桥接 (read/bash ➔ run_code 子调用)       │
-   │  3. 编辑器越界与路径修剪 (相对路径 ➔ 绝对路径, 范围收敛) │
+   │  2. 直接调用安全恢复 (保留上下文的嵌套派发)              │
+   │  3. 编辑器路径与范围修正 (相对路径、倒置/越界范围)       │
    │  4. 动态精简提示词注入 (按需挂载, 零冗余 Token)          │
    │  5. 实时运行遥测与统计分析追踪器 (Tracker)              │
    └────────────────────────────────────────────────────────┘
               │
               ▼
-       执行成功 (0 报错阻断)
+       尽量恢复可修复错误
               │
               ▼
     [Web UI] 设置面板 ➔ 工具自愈与统计 (实时图表与日志)
@@ -60,14 +60,16 @@
   - 自动补全缺失或为空的 `description` 字段。
   - 自动剥离误包含的 Markdown 代码块标记（如 ````typescript ... ````）。
 - 🌉 **Code-Mode 透明工具桥接**：
-  - 适用于未直接注册标准工具的部署（仅注册了 `run_code`）：模型直调 `bash`、`read`、`write`、`grep`、`edit` 或 `glob` 时，插件自动在后台将其包装为 `run_code` 子分发执行并回传结果，不再抛出 `UNKNOWN_TOOL`。
-  - 适用范围说明：在 PTC（`code`）折叠模式下，被折叠的工具仍处于注册状态，宿主会在任何监听器之前确定性拒绝直调——本规则不参与该路径；宿主自身的拒绝消息会引导模型回到 `run_code`。
+  - 当 `UNKNOWN_TOOL` 已经进入 `tools/execute` 且目标工具在当前 Agent 作用域中可见时，插件通过宿主的 `tools.execute()` 重新以嵌套调用派发，保留 Agent、会话、取消信号、上下文和终结状态。
+  - 适用范围说明：在 PTC（`code`）折叠模式下，宿主可能在任何监听器之前拒绝直调；这条路径插件无法仅靠自身拦截。插件也不会直接调用工具定义的 `execute()` 方法。
 - 📐 **编辑器参数与边界纠偏**：
-  - 自动将相对路径转换为基于当前工作区的绝对路径。
-  - 自动收敛 `str_replace_editor` 中越界或倒置的 `view_range` 行号范围。
+  - 自动将相对路径转换为当前会话工作目录下的绝对路径。
+  - 先做结构性范围修正；当 `str_replace_editor` 返回包含文件行数的越界错误时，按真实行数嵌套重试，并保留 `-1` 到文件末尾的语义。
+- 🩹 **文件观察后重试**：
+  - 仅当编辑/写入返回 `FS_NOT_OBSERVED` 时读取目标文件，再通过宿主标准派发重试一次；正常调用不会预先增加一次读取。
 - 📊 **可视化运行与诊断面板 (Web UI)**：
   - 无缝挂载至 DSH 的 **设置面板（`settings.section`）**。
-  - 实时呈现核心 KPI 指标：拦截总数、成功纠正数、纠正成功率 %、未恢复错误数。
+  - 实时呈现核心 KPI 指标：拦截总数、成功纠正数、纠正尝试成功率 %、未恢复错误数。
   - 工具维度与问题类别的可视化分布进度条。
   - 支持按状态（全部 / 仅看纠偏 / 仅看失败）筛选的实时运行流水明细表，直观对比纠偏前后的输入差异。
 
@@ -135,18 +137,24 @@ pnpm dsh web
       config:
         autoWrapRunCode: true
         autoBridgeDirectTools: true
+        autoObserveFiles: true
         autoClampRanges: true
         injectPrompt: true
         estimatedRetryTokenCost: 8000
+        persistPassthrough: false
 ```
 
 | 配置字段 | 类型 | 默认值 | 作用说明 |
 | :--- | :---: | :---: | :--- |
 | `autoWrapRunCode` | `boolean` | `true` | 自动转换 `command` 属性为 `code`，自动补全描述，剥离 Markdown 标记 |
-| `autoBridgeDirectTools` | `boolean` | `true` | 在 Code-Mode 下自动将直接工具调用桥接为 `run_code` 执行 |
-| `autoClampRanges` | `boolean` | `true` | 自动收敛编辑器的 `view_range` 并将相对路径转为绝对路径 |
+| `autoBridgeDirectTools` | `boolean` | `true` | 仅对已进入 `tools/execute` 的 `UNKNOWN_TOOL` 结果尝试安全嵌套恢复；宿主提前拒绝的调用插件无法拦截 |
+| `autoObserveFiles` | `boolean` | `true` | 仅在收到 `FS_NOT_OBSERVED` 后读取目标并重试一次编辑/写入 |
+| `autoClampRanges` | `boolean` | `true` | 修正编辑器范围并将相对路径转为当前会话目录下的绝对路径 |
 | `injectPrompt` | `boolean` | `true` | 动态向 `systemPrompt` 注册极简工具最佳实践提示词（静态文本，不影响前缀缓存命中） |
 | `estimatedRetryTokenCost` | `number` | `8000` | 单次避免失败重试的估算 input token 成本；驱动看板的"预估节省Token"指标（明确标注为估算值） |
+| `persistPassthrough` | `boolean` | `false` | 是否将未修改且成功的正常放行调用逐条写入 JSONL；默认仅保留聚合计数，失败和自愈事件仍保留明细 |
+
+成功率只计算实际发生修复/恢复尝试的调用：`healedSuccess / (healedSuccess + healedFailed)`。正常成功放行不会进入详细 JSONL，以避免日志被高频健康调用淹没；其计数写入同目录的 `tool-normalizer-summary.json`。
 
 ---
 

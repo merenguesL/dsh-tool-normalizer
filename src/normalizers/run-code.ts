@@ -11,7 +11,7 @@
  */
 export function stripMarkdownFences(code: string): string {
   const trimmed = code.trim()
-  const match = /^```(?:[a-zA-Z0-9_-]+)?\r?\n([\s\S]*?)\r?\n```$/m.exec(trimmed)
+  const match = /^```(?:[a-zA-Z0-9_-]+)?\r?\n([\s\S]*?)\r?\n```$/.exec(trimmed)
   if (match && match[1]) {
     return match[1].trim()
   }

@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-08-26
+
+### Added
+
+- **Context-preserving nested recovery**: UNKNOWN_TOOL recovery and observe-then-retry now redispatch through the host `tools.execute()` path with the original agent, root call, parent token, cancellation signal, and standard result handling.
+- **Observe-then-retry for filesystem mutations**: after `FS_NOT_OBSERVED`, the plugin reads the target and retries the mutation at most once; out-of-range editor errors can likewise trigger one bounded retry using the session working directory.
+
+### Changed
+
+- Successful untouched pass-through calls now contribute to aggregate counters and a compact summary, but are excluded from detailed JSONL records by default. Set `persistPassthrough: true` when per-call auditing is required.
+- Failure accounting distinguishes failed healing attempts from unmodified pass-through failures, and the reset endpoint clears both in-memory and durable statistics.
+
 ## [0.3.1] - 2026-08-26
 
 ### Fixed

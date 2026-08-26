@@ -30,7 +30,7 @@ Detailed root-cause analysis identified four primary structural error drivers:
 
 ## 🎯 What Problems `dsh-tool-normalizer` Solves
 
-`dsh-tool-normalizer` acts as a zero-overhead, deterministic safety middleware on the `tools/execute` waterfall extension point, paired with an integrated Web UI diagnostics dashboard.
+`dsh-tool-normalizer` acts as a low-overhead, deterministic safety middleware on the `tools/execute` waterfall extension point, paired with an integrated Web UI diagnostics dashboard.
 
 ```
        Model Tool Call
@@ -40,14 +40,14 @@ Detailed root-cause analysis identified four primary structural error drivers:
    │             dsh-tool-normalizer (Plugin)               │
    │                                                        │
    │  1. run_code Normalizer (command ➔ code, description)   │
-   │  2. Direct-to-Code-Mode Bridge (read/bash ➔ run_code)  │
-   │  3. Range & Path Clamper (relative ➔ absolute, bounds) │
+   │  2. Safe Direct-Call Recovery (context-preserving nested dispatch) │
+   │  3. Range & Path Normalizer (relative paths, real bounds)        │
    │  4. Dynamic Prompt Guidance (minimal token footprint)  │
    │  5. Real-Time Telemetry & Statistics Tracker           │
    └────────────────────────────────────────────────────────┘
               │
               ▼
-    Clean & Valid Execution (0% Interruption)
+    Best-effort Recovery of Repairable Errors
               │
               ▼
     [Web UI] Settings ➔ Tool Normalizer & Diagnostics Page
@@ -60,16 +60,18 @@ Detailed root-cause analysis identified four primary structural error drivers:
   - Fills in missing `description` fields with sensible contextual defaults.
   - Strips accidental Markdown code block fences (e.g. ````typescript ... ````).
 - 🌉 **Code-Mode Direct Tool Bridging**:
-  - When a deployment does not register the standard tools directly (only `run_code` is registered) and the model calls `bash`, `read`, `write`, `grep`, `edit`, or `glob`, the plugin transparently synthesizes an internal `run_code` wrapper instead of failing with `UNKNOWN_TOOL`.
-  - Scope note: under the PTC (`code`) presentation collapse, collapsed tools stay registered, so the host deterministically denies direct calls **before** any listener runs — this rule does not apply there; the host's own denial message routes the model back to `run_code`.
+  - When an `UNKNOWN_TOOL` result reaches `tools/execute` and the target is visible in the active agent scope, the plugin re-dispatches it through the host's `tools.execute()` API as a nested call, preserving agent/session ownership, cancellation, contexts, and terminal state.
+  - Scope note: under the PTC (`code`) presentation collapse, the host may reject a direct call before any listener runs; a plugin cannot intercept that path. The plugin never invokes a tool definition's `execute()` method directly.
 - 🩹 **Inner-Call Description Injection**:
   - Before a `run_code` program executes, inserts generated descriptions into its `tools.*()` calls that lack them — inner sub-dispatch validation requires `description`, and missing ones were the dominant production failure class.
 - 📐 **Editor Parameter & Bounds Normalization**:
-  - Clamps inverted or out-of-bounds `view_range` parameters in `str_replace_editor`.
-  - Resolves relative file paths to absolute paths against the session root.
+  - Corrects structural and inverted `view_range` values in `str_replace_editor`; when the real error reports a line count, it retries with that bound and preserves the `-1` end-of-file sentinel.
+  - Resolves relative file paths to absolute paths against the session working directory.
+- 🩹 **Observe-then-Retry Recovery**:
+  - Only after `FS_NOT_OBSERVED` does the plugin read the target and retry the mutation once through the host dispatcher; normal calls do not pay for a speculative read.
 - 📈 **Projected Token Savings**:
   - Estimates the input tokens avoided by each successful healing (`healedSuccess × estimatedRetryTokenCost`), shown in the dashboard, clearly labeled as an estimate.
-  - Live observability: every interception logs a server-side debug line, and appends one JSONL event to `~/.dsh/tool-normalizer-events.jsonl` — unbounded history with O(1) appends, replayed at boot so statistics accumulate across restarts.
+  - Live observability: every interception updates aggregate counters. Healing attempts and failures append detailed JSONL events to `~/.dsh/tool-normalizer-events.jsonl`; successful untouched pass-through calls are aggregated in `tool-normalizer-summary.json` by default instead of expanding the detail log.
   - The dashboard reads live data from the same-origin feed `GET /plugin-api/tool-normalizer/stats`, registered by the node half when a webserver is present.
 - 📊 **Web UI Execution & Diagnostics Dashboard**:
   - Embedded directly into DSH's **Settings (`settings.section`)** panel.
@@ -141,18 +143,24 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
       config:
         autoWrapRunCode: true
         autoBridgeDirectTools: true
+        autoObserveFiles: true
         autoClampRanges: true
         injectPrompt: true
         estimatedRetryTokenCost: 8000
+        persistPassthrough: false
 ```
 
 | Option | Type | Default | Description |
 | :--- | :---: | :---: | :--- |
 | `autoWrapRunCode` | `boolean` | `true` | Auto-convert `command` -> `code`, supply missing descriptions, strip Markdown fences. |
-| `autoBridgeDirectTools` | `boolean` | `true` | Bridge direct `bash`/`read`/`write` calls into `run_code` when in Code-Mode. |
-| `autoClampRanges` | `boolean` | `true` | Clamp out-of-bounds `view_range` and resolve relative paths. |
+| `autoBridgeDirectTools` | `boolean` | `true` | Safely re-dispatch an `UNKNOWN_TOOL` result that reached `tools/execute`; host-level pre-dispatch denials cannot be intercepted by a plugin. |
+| `autoObserveFiles` | `boolean` | `true` | After `FS_NOT_OBSERVED`, read the target and retry one edit/write through the host dispatcher. |
+| `autoClampRanges` | `boolean` | `true` | Correct editor ranges and resolve relative paths against the session directory. |
 | `injectPrompt` | `boolean` | `true` | Dynamically register prompt guidelines with `ctx.systemPrompt`. Static text only — never breaks prefix caching. |
 | `estimatedRetryTokenCost` | `number` | `8000` | Estimated input tokens of one avoided retry; drives the dashboard's token-savings projection (labeled as an estimate). |
+| `persistPassthrough` | `boolean` | `false` | Persist successful untouched pass-through calls as detailed JSONL events; failures and healing attempts are always retained. |
+
+Healing success rate is `healedSuccess / (healedSuccess + healedFailed)` and excludes untouched pass-through failures. Successful untouched calls are kept in aggregate counters and the compact `tool-normalizer-summary.json`, not one detail line per call.
 
 ---
 

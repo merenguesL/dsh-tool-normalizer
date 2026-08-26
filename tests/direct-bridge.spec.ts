@@ -1,65 +1,85 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { isBridgeableDirectCall, executeBridgeDirectCall } from '../src/normalizers/direct-bridge.ts'
 import type { ToolRuntime, ToolDispatchExecution } from '../src/types.ts'
 
+function execution(overrides: Partial<ToolDispatchExecution> = {}): ToolDispatchExecution {
+  return {
+    name: 'bash',
+    arguments: { command: 'echo hello' },
+    callId: 'c1',
+    rootCallId: 'root-1',
+    token: Symbol('token'),
+    agent: { session: { id: 'session-1' } },
+    signal: new AbortController().signal,
+    ...overrides,
+  }
+}
+
 describe('direct-bridge normalizer', () => {
-  it('identifies bridgeable tools when run_code is registered but direct tool is not', () => {
+  it('identifies a recoverable direct call only when the target and dispatcher exist', () => {
     const mockTools = {
       get: (name: string) => {
-        if (name === 'run_code') return { name: 'run_code' }
+        if (name === 'run_code' || name === 'bash') return { name }
         return undefined
       },
-    } as ToolRuntime
-
-    expect(isBridgeableDirectCall('bash', mockTools)).toBe(true)
-    expect(isBridgeableDirectCall('read', mockTools)).toBe(true)
-    expect(isBridgeableDirectCall('write', mockTools)).toBe(true)
-    expect(isBridgeableDirectCall('grep', mockTools)).toBe(true)
-    expect(isBridgeableDirectCall('unknown_custom_tool', mockTools)).toBe(false)
-  })
-
-  it('does not bridge if direct tool is already registered', () => {
-    const mockTools = {
-      get: (name: string) => {
-        if (name === 'bash') return { name: 'bash' }
-        if (name === 'run_code') return { name: 'run_code' }
-        return undefined
-      },
-    } as ToolRuntime
-
-    expect(isBridgeableDirectCall('bash', mockTools)).toBe(false)
-  })
-
-  it('synthesizes and executes run_code for bridgeable tool', async () => {
-    let executedArgs: any = null
-    const mockTools = {
-      get: (name: string) => {
-        if (name === 'run_code') {
-          return {
-            name: 'run_code',
-            execute: async (exec: any) => {
-              executedArgs = exec.arguments
-              return { isError: false, content: [{ type: 'text', text: 'hello' }] }
-            },
-          }
-        }
-        return undefined
-      },
+      execute: vi.fn(),
     } as unknown as ToolRuntime
 
-    const mockExec: ToolDispatchExecution = {
+    expect(isBridgeableDirectCall(execution(), mockTools)).toBe(true)
+    expect(isBridgeableDirectCall(execution({ name: 'unknown_custom_tool' }), mockTools)).toBe(false)
+    expect(isBridgeableDirectCall(execution({ parent: Symbol('parent') }), mockTools)).toBe(false)
+  })
+
+  it('does not claim a bridge when the target tool is absent', () => {
+    const mockTools = {
+      get: (name: string) => name === 'run_code' ? { name } : undefined,
+      execute: vi.fn(),
+    } as unknown as ToolRuntime
+
+    expect(isBridgeableDirectCall(execution(), mockTools)).toBe(false)
+  })
+
+  it('re-dispatches through tools.execute and preserves execution context', async () => {
+    let dispatched: Record<string, unknown> | undefined
+    const result = {
+      isError: false as const,
+      value: { ok: true },
+      content: [{ type: 'text', text: 'hello' }],
+      additionalContexts: [{ source: 'tool' }],
+      concludesTurn: true as const,
+    }
+    const mockTools = {
+      get: (name: string) => ({ name }),
+      execute: vi.fn(async (input: Record<string, unknown>) => {
+        dispatched = input
+        return result
+      }),
+    } as unknown as ToolRuntime
+    const agent = { session: { id: 'session-1' } }
+    const signal = new AbortController().signal
+    const mockExec = execution({ agent, signal })
+
+    await expect(executeBridgeDirectCall(mockExec, mockTools)).resolves.toBe(result)
+    expect(dispatched).toMatchObject({
       name: 'bash',
       arguments: { command: 'echo hello' },
-      callId: 'c1',
-      rootCallId: 'c1',
-      token: 'tok',
-      signal: new AbortController().signal,
-    }
+      rootCallId: 'root-1',
+      agent,
+      parent: mockExec.token,
+      signal,
+    })
+    expect(dispatched?.['callId']).toBe('c1:normalizer:bridge-bash')
+  })
 
-    const result = await executeBridgeDirectCall(mockExec, mockTools)
-    expect(result.isError).toBe(false)
-    expect(executedArgs).toBeDefined()
-    expect(executedArgs.description).toContain('Execute bash in Code-Mode')
-    expect(executedArgs.code).toContain('await tools.bash({"command":"echo hello"})')
+  it('returns an explicit failure when the original token is unavailable', async () => {
+    const mockTools = {
+      get: (name: string) => ({ name }),
+      execute: vi.fn(),
+    } as unknown as ToolRuntime
+
+    const result = await executeBridgeDirectCall(execution({ token: undefined }), mockTools)
+    expect(result.isError).toBe(true)
+    expect(result.content?.[0]?.text).toContain('execution token')
+    expect(mockTools.execute).not.toHaveBeenCalled()
   })
 })

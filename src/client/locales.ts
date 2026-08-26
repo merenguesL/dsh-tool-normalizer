@@ -7,7 +7,7 @@
 export const zh = {
   nav: '工具自愈与统计',
   title: '工具自愈与运行诊断看板',
-  subtitle: '实时拦截模型 Tool Call 异常、智能修复参数、透明桥接 Code-Mode 并追踪自愈成效',
+  subtitle: '实时诊断 Tool Call 异常、保留宿主上下文恢复调用并追踪修复成效',
   refresh: '刷新数据',
   clear: '清空记录',
   export: '导出诊断报告',
@@ -27,7 +27,7 @@ export const zh = {
   kpiSavedRounds: '预估节省交互轮次',
   kpiSavedRoundsDesc: '有效避免的 Agent 中断与 Token 浪费',
   kpiFailed: '未恢复异常',
-  kpiFailedDesc: '底层工具执行本身的业务错误',
+  kpiFailedDesc: '自愈失败与未修改调用的底层错误',
   kpiSavedTokens: '预估节省Token',
   kpiSavedTokensDesc: '自愈次数 × 单次重试估算成本（可在插件配置调整）',
   estimateBadge: '估算值',
@@ -39,10 +39,11 @@ export const zh = {
 
   // Category Labels
   catInvalidArgs: '参数缺失/错位 (INVALID_ARGS)',
-  catUnknownTool: 'Code-Mode 惯性直接调用 (UNKNOWN_TOOL)',
-  catRangeClamp: '编辑器边界与相对路径 (RANGE_CLAMP)',
+  catUnknownTool: '未知工具安全恢复 (UNKNOWN_TOOL)',
+  catRangeClamp: '编辑器范围与会话路径 (RANGE_CLAMP)',
   catCodeWrap: '代码块语法与格式自愈 (CODE_WRAP)',
   catInnerDesc: '内层调用补全描述 (INNER_DESC)',
+  catFsObserved: '文件观察后重试 (FS_OBSERVED)',
   catPassthrough: '正常直通 (PASSTHROUGH)',
 
   // Table & Filters
@@ -68,7 +69,7 @@ export const zh = {
 
   // Analytics View
   toolRankTitle: '高频异常工具排行',
-  categoryRankTitle: '异常原因归因占比',
+  categoryRankTitle: '事件类别与修复方式',
   healthScoreTitle: 'Agent 工具调用健康度评估',
   healthGood: '健康度极佳：大部分异常已被自愈拦截器平滑兜底。',
   healthFair: '健康度良好：存在偶发未捕获错误，建议关注模型 Prompt 规范。',
@@ -78,11 +79,13 @@ export const zh = {
   rule1Title: 'run_code 参数智能自愈 (Schema Auto-Healing)',
   rule1Desc: '自动将模型误传的 command 转换为标准 JavaScript 代码，自动补齐缺失的 description 必填项，自动剥离 Markdown 围栏。',
   rule2Title: 'Code-Mode 透明工具桥接 (Direct-to-CodeMode Bridge)',
-  rule2Desc: '当处于 Code-Mode 时，若模型直接调用 read/bash/write/grep，自动将其桥接为 run_code(tools.xxx) 子调用，彻底杜绝 UNKNOWN_TOOL。',
-  rule3Title: '编辑器边界与绝对路径收敛 (Range & Path Clamper)',
-  rule3Desc: '自动将相对路径转换为基于当前工作区的绝对路径，自动收敛并修正 str_replace_editor 中越界或倒置的行号。',
-  rule4Title: '动态极简提示词增强 (Prompt Invariant Injection)',
-  rule4Desc: '向系统提示词注入极小体积的最佳实践规范（先读后改、绝对路径使用），从源头减少模型试错。',
+  rule2Desc: '仅对已经进入 tools/execute 的 UNKNOWN_TOOL 结果尝试保留上下文的嵌套派发；宿主提前拒绝的直调无法由插件拦截。',
+  rule3Title: '编辑器范围与会话路径修正 (Range & Path Normalizer)',
+  rule3Desc: '按当前会话工作目录修正相对路径，修正倒置范围，并在错误提供真实行数时安全重试越界 view_range。',
+  rule4Title: '文件观察后重试 (Observe-then-Retry)',
+  rule4Desc: '仅在编辑或写入收到 FS_NOT_OBSERVED 后读取目标，再通过宿主标准派发重试一次，避免无条件增加读取调用。',
+  rule5Title: '动态极简提示词增强 (Prompt Invariant Injection)',
+  rule5Desc: '向系统提示词注入极小体积的最佳实践规范（先读后改、绝对路径使用），从源头减少模型试错。',
   
   statusEnabled: '已启用',
   statusActive: '生效中',

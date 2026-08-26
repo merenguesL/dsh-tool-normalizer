@@ -1,15 +1,24 @@
 /**
- * Auto-healing, argument normalization, and Code-Mode direct tool bridging for DeepSeek Harness.
+ * Auto-healing, argument normalization, and safe nested tool recovery for DeepSeek Harness.
  *
  * @module dsh-tool-normalizer
  */
 
 import { executeBridgeDirectCall, isBridgeableDirectCall } from './normalizers/direct-bridge.ts'
 import { injectInnerDescriptions } from './normalizers/inner-description.ts'
+import { executeNestedTool, nestedCallId } from './normalizers/nested-dispatch.ts'
 import { normalizeEditorArguments } from './normalizers/range-clamper.ts'
 import { normalizeRunCodeArguments } from './normalizers/run-code.ts'
 import { registerPromptGuidance } from './prompt.ts'
-import { appendEvent, restoreFromLog, setRetryTokenCost, statsLogPath } from './stats-log.ts'
+import {
+  appendEvent,
+  clearLog,
+  flushStatsLog,
+  persistSnapshot,
+  restoreFromLog,
+  setRetryTokenCost,
+  statsLogPath,
+} from './stats-log.ts'
 import { ToolNormalizerTracker } from './tracker.ts'
 import type { Config, ToolDispatchExecution, ToolExecutionResult } from './types.ts'
 
@@ -26,6 +35,139 @@ export const name = 'tool-normalizer'
 /** Injected services required from Cordis context. */
 export const inject = ['tools']
 
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined
+  const candidate = error as { code?: unknown; info?: { code?: unknown } }
+  if (typeof candidate.code === 'string') return candidate.code
+  return typeof candidate.info?.code === 'string' ? candidate.info.code : undefined
+}
+
+function errorText(error: unknown): string | undefined {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    return typeof message === 'string' ? message : undefined
+  }
+  return typeof error === 'string' ? error : undefined
+}
+
+function resultHasCode(result: ToolExecutionResult, code: string): boolean {
+  return result.isError === true && errorCode(result.error) === code
+}
+
+function thrownHasCode(error: unknown, code: string): boolean {
+  return errorCode(error) === code
+    || errorText(error)?.includes(code) === true
+}
+
+function resultErrorText(result: ToolExecutionResult): string | undefined {
+  return result.isError === true ? errorText(result.error) : undefined
+}
+
+function lineCountFromRangeError(result: ToolExecutionResult): number | undefined {
+  const message = resultErrorText(result)
+  if (message === undefined || !message.includes('view_range')) return undefined
+  const match = /(?:range of lines of the file:\s*\[1,\s*|number of lines in the file:\s*`?)(\d+)/u.exec(message)
+  const lineCount = match === null ? undefined : Number(match[1])
+  return lineCount !== undefined && Number.isSafeInteger(lineCount) && lineCount > 0 ? lineCount : undefined
+}
+
+function sessionCwd(agent: unknown): string | undefined {
+  if (typeof agent !== 'object' || agent === null) return undefined
+  const session = (agent as { session?: unknown }).session
+  if (typeof session !== 'object' || session === null) return undefined
+  const header = (session as { header?: unknown }).header
+  if (typeof header !== 'object' || header === null) return undefined
+  const cwd = (header as { cwd?: unknown }).cwd
+  return typeof cwd === 'string' && cwd.trim().length > 0 ? cwd : undefined
+}
+
+function isObservationMutation(name: string, args: unknown): boolean {
+  if (name === 'edit' || name === 'write') return true
+  if (name !== 'str_replace_editor') return false
+  const object = objectValue(args)
+  return object?.['command'] === 'str_replace' || object?.['command'] === 'insert'
+}
+
+function editPath(args: unknown): string | undefined {
+  const object = objectValue(args)
+  if (!object) return undefined
+  const path = object['file_path'] ?? object['path']
+  return typeof path === 'string' && path.trim().length > 0 ? path : undefined
+}
+
+/** A call id currently being executed as an observation retry. */
+const observationRetryCallIds = new Set<string>()
+const rangeRetryCallIds = new Set<string>()
+
+function isObservationRetry(exec: ToolDispatchExecution): boolean {
+  return typeof exec.callId === 'string' && observationRetryCallIds.has(exec.callId)
+}
+
+function isRangeRetry(exec: ToolDispatchExecution): boolean {
+  return typeof exec.callId === 'string' && rangeRetryCallIds.has(exec.callId)
+}
+
+async function observeAndRetryMutation(
+  exec: ToolDispatchExecution,
+  tools: NonNullable<ReturnType<typeof getToolRuntime>>,
+): Promise<ToolExecutionResult | undefined> {
+  if (!isObservationMutation(exec.name, exec.arguments)) return undefined
+  if (exec.agent === undefined) return undefined
+  const path = editPath(exec.arguments)
+  if (path === undefined) return undefined
+
+  const readName = tools.get('read', exec.agent) !== undefined ? 'read'
+    : exec.name === 'str_replace_editor' && tools.get('str_replace_editor', exec.agent) !== undefined
+      ? 'str_replace_editor'
+      : undefined
+  if (readName === undefined) return undefined
+  const readArgs = readName === 'read'
+    ? { file_path: path }
+    : { command: 'view', path }
+  const observed = await executeNestedTool(exec, tools, readName, readArgs, 'observe-read')
+  if (observed.isError) return undefined
+
+  const retryId = nestedCallId(exec, 'observe-edit')
+  observationRetryCallIds.add(retryId)
+  try {
+    return await executeNestedTool(exec, tools, exec.name, exec.arguments, 'observe-edit')
+  } finally {
+    observationRetryCallIds.delete(retryId)
+  }
+}
+
+async function clampAndRetryRange(
+  exec: ToolDispatchExecution,
+  tools: NonNullable<ReturnType<typeof getToolRuntime>>,
+  lineCount: number,
+): Promise<{ result: ToolExecutionResult; args: Record<string, unknown> } | undefined> {
+  if (exec.name !== 'str_replace_editor') return undefined
+  const normalized = normalizeEditorArguments(exec.name, exec.arguments, sessionCwd(exec.agent), lineCount)
+  if (JSON.stringify(normalized) === JSON.stringify(exec.arguments)) return undefined
+
+  const retryId = nestedCallId(exec, 'range-retry')
+  rangeRetryCallIds.add(retryId)
+  try {
+    return {
+      result: await executeNestedTool(exec, tools, exec.name, normalized, 'range-retry'),
+      args: normalized,
+    }
+  } finally {
+    rangeRetryCallIds.delete(retryId)
+  }
+}
+
+function getToolRuntime(ctx: any): any {
+  return typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
+}
+
 /**
  * Applies the tool normalizer and auto-healing plugin.
  *
@@ -40,16 +182,22 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     autoClampRanges: userConfig.autoClampRanges ?? true,
     injectPrompt: userConfig.injectPrompt ?? true,
     estimatedRetryTokenCost: userConfig.estimatedRetryTokenCost ?? 8000,
+    persistPassthrough: userConfig.persistPassthrough ?? false,
   }
 
   const tracker = ToolNormalizerTracker.getInstance()
+  tracker.setPersistPassthrough(config.persistPassthrough)
   setRetryTokenCost(config.estimatedRetryTokenCost)
-  void restoreFromLog(tracker)
+  const restoreReady = restoreFromLog(tracker)
+    .catch((error: unknown) => {
+      ctx.logger?.warn?.(`[tool-normalizer] history restore failed: ${errorText(error) ?? String(error)}`)
+    })
+    .then(() => { persistSnapshot(tracker.getSnapshot()) })
 
   /** Record one real event, append it to the durable log, and log a line. */
   const recordEvent = (record: Parameters<typeof tracker.record>[0]): void => {
     tracker.record(record)
-    appendEvent(record)
+    appendEvent(record, tracker.getSnapshot(), { persistPassthrough: config.persistPassthrough })
     ctx.logger?.debug?.(
       `[tool-normalizer] ${record.toolName} category=${record.category} healed=${record.wasHealed} status=${record.status}`,
     )
@@ -62,25 +210,57 @@ export function apply(ctx: any, userConfig: Config = {}): void {
   // giving up on the first ctx.get miss. Never declared as inject — a
   // CLI-only profile without any webserver must still load.
   let registerAttempts = 0
+  let routeTimer: ReturnType<typeof setTimeout> | undefined
+  let routesStopped = false
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => () => {
+      routesStopped = true
+      if (routeTimer !== undefined) clearTimeout(routeTimer)
+      void flushStatsLog()
+    }, 'tool-normalizer: runtime teardown')
+  }
   const tryRegisterStatsRoute = (): void => {
+    if (routesStopped) return
     const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : ctx.webServer
     if (!webServer || typeof webServer.register !== 'function') {
       if (registerAttempts++ < 60) {
-        const timer = setTimeout(tryRegisterStatsRoute, 1000)
-        timer.unref?.()
+        routeTimer = setTimeout(tryRegisterStatsRoute, 1000)
+        routeTimer.unref?.()
       } else {
         ctx.logger?.warn?.('[tool-normalizer] no webserver appeared within 60s; stats feed disabled')
       }
       return
     }
-    ctx.effect(() => webServer.register({
-      kind: 'exact',
-      path: '/plugin-api/tool-normalizer/stats',
-      handler: (_req: unknown, res: { writeHead(status: number, headers: Record<string, string>): void; end(body: string): void }) => {
-        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
-        res.end(JSON.stringify(tracker.getSnapshot()))
-      },
-    }), 'tool-normalizer: stats http route')
+    ctx.effect(() => {
+      const disposeStats = webServer.register({
+        kind: 'exact',
+        path: '/plugin-api/tool-normalizer/stats',
+        handler: (_req: unknown, res: { writeHead(status: number, headers: Record<string, string>): void; end(body: string): void }) => {
+          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+          res.end(JSON.stringify(tracker.getSnapshot()))
+        },
+      })
+      const disposeReset = webServer.register({
+        kind: 'exact',
+        path: '/plugin-api/tool-normalizer/reset',
+        handler: (req: { method?: string }, res: { writeHead(status: number, headers?: Record<string, string>): void; end(body?: string): void }) => {
+          if (req.method !== 'POST') {
+            res.writeHead(405, { allow: 'POST' })
+            res.end()
+            return
+          }
+          tracker.reset()
+          void clearLog().then(() => {
+            res.writeHead(204, {})
+            res.end()
+          })
+        },
+      })
+      return () => {
+        disposeReset?.()
+        disposeStats?.()
+      }
+    }, 'tool-normalizer: stats http routes')
     ctx.logger?.info?.('[tool-normalizer] stats feed at GET /plugin-api/tool-normalizer/stats')
   }
   tryRegisterStatsRoute()
@@ -90,37 +270,21 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     registerPromptGuidance(ctx)
   }
 
-  const getTools = () => (typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools)
+  const getTools = () => getToolRuntime(ctx)
 
   // Intercept and normalize tool dispatches
   ctx.on('tools/execute', async (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>): Promise<ToolExecutionResult> => {
-    const rawArgsStr = JSON.stringify(exec.arguments ?? {})
+    await restoreReady
+    const rawArgsStr = JSON.stringify(exec.arguments ?? {}) ?? '{}'
     const startTime = Date.now()
     const eventId = `norm_${startTime}_${Math.random().toString(36).slice(2, 8)}`
     const tools = getTools()
 
-    // 1. Direct tool to Code-Mode bridging when tool is not registered directly
-    if (config.autoBridgeDirectTools && tools && isBridgeableDirectCall(exec.name, tools)) {
-      const result = await executeBridgeDirectCall(exec, tools)
-      recordEvent({
-        id: eventId,
-        time: startTime,
-        toolName: exec.name,
-        category: 'UNKNOWN_TOOL',
-        wasHealed: true,
-        originalArgsPreview: rawArgsStr.slice(0, 150),
-        normalizedArgsPreview: `Bridged to run_code(tools.${exec.name})`,
-        status: result.isError ? 'failed' : 'success',
-        errorMessage: result.isError && result.error ? result.error.message : undefined,
-      })
-      return result
-    }
-
     let wasHealed = false
-    let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'INNER_DESC' | 'PASSTHROUGH' = 'PASSTHROUGH'
+    let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'INNER_DESC' | 'FS_OBSERVED' | 'PASSTHROUGH' = 'PASSTHROUGH'
     let normalizedPreview: string | undefined
 
-    // 2. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
+    // 1. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
     if (exec.name === 'run_code' && config.autoWrapRunCode) {
       const originalObj = exec.arguments as Record<string, unknown> | undefined
       const isCmdPass = originalObj && ('command' in originalObj || 'cmd' in originalObj)
@@ -149,9 +313,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       exec.arguments = normalized
     }
 
-    // 3. Normalize editor arguments (relative paths, view ranges)
+    // 2. Normalize editor arguments (relative paths, view ranges)
     if ((exec.name === 'edit' || exec.name === 'str_replace_editor') && config.autoClampRanges) {
-      const normalized = normalizeEditorArguments(exec.name, exec.arguments)
+      const normalized = normalizeEditorArguments(exec.name, exec.arguments, sessionCwd(exec.agent))
       if (JSON.stringify(normalized) !== rawArgsStr) {
         wasHealed = true
         healCategory = 'RANGE_CLAMP'
@@ -162,7 +326,57 @@ export function apply(ctx: any, userConfig: Config = {}): void {
 
     // 4. Delegate to the downstream execution pipeline
     try {
-      const result = await next()
+      let result = await next()
+
+      // A host that exposes Code-Mode collapse through the waterfall may
+      // return UNKNOWN_TOOL here. Re-enter the public runtime dispatcher as a
+      // nested call; this keeps the real result/context contract intact. A
+      // collapsed call rejected in createExecution never reaches this plugin,
+      // which remains a host limitation rather than a reason to call a tool
+      // definition directly.
+      if (config.autoBridgeDirectTools && tools && resultHasCode(result, 'UNKNOWN_TOOL')
+        && isBridgeableDirectCall(exec, tools)) {
+        result = await executeBridgeDirectCall(exec, tools)
+        recordEvent({
+          id: eventId,
+          time: startTime,
+          toolName: exec.name,
+          category: 'UNKNOWN_TOOL',
+          wasHealed: true,
+          originalArgsPreview: rawArgsStr.slice(0, 150),
+          normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
+          status: result.isError ? 'failed' : 'success',
+          errorMessage: resultErrorText(result),
+        })
+        return result
+      }
+
+      // Do not pre-read every mutation. Only the guarded-mutation failure
+      // triggers one read followed by one standard nested retry, so normal
+      // edits/writes pay no extra tool call and the retry remains scoped to the
+      // original session.
+      if (config.autoObserveFiles && !isObservationRetry(exec) && tools
+        && resultHasCode(result, 'FS_NOT_OBSERVED')) {
+        const retried = await observeAndRetryMutation(exec, tools)
+        if (retried !== undefined) {
+          wasHealed = true
+          healCategory = 'FS_OBSERVED'
+          normalizedPreview = `Read ${editPath(exec.arguments) ?? 'file'} then retry`
+          result = retried
+        }
+      }
+      if (config.autoClampRanges && !isRangeRetry(exec) && tools && result.isError === true) {
+        const lineCount = lineCountFromRangeError(result)
+        if (lineCount !== undefined) {
+          const retried = await clampAndRetryRange(exec, tools, lineCount)
+          if (retried !== undefined) {
+            wasHealed = true
+            healCategory = 'RANGE_CLAMP'
+            normalizedPreview = JSON.stringify(retried.args).slice(0, 150)
+            result = retried.result
+          }
+        }
+      }
       recordEvent({
         id: eventId,
         time: startTime,
@@ -172,17 +386,18 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         originalArgsPreview: rawArgsStr.slice(0, 150),
         normalizedArgsPreview: normalizedPreview,
         status: result.isError ? 'failed' : (wasHealed ? 'success' : 'passthrough'),
-        errorMessage: result.isError && result.error ? result.error.message : undefined,
+        errorMessage: resultErrorText(result),
       })
       return result
     } catch (error: unknown) {
-      // If downstream execution failed due to ToolNotFoundError (UNKNOWN_TOOL),
-      // attempt fallback bridging to run_code
+      // If a legacy host throws UNKNOWN_TOOL after entering the waterfall,
+      // attempt the same safe nested-dispatch recovery.
       const currentTools = getTools()
       if (
         config.autoBridgeDirectTools
         && currentTools
-        && isBridgeableDirectCall(exec.name, currentTools)
+        && thrownHasCode(error, 'UNKNOWN_TOOL')
+        && isBridgeableDirectCall(exec, currentTools)
       ) {
         const bridgedResult = await executeBridgeDirectCall(exec, currentTools)
         recordEvent({
@@ -192,8 +407,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           category: 'UNKNOWN_TOOL',
           wasHealed: true,
           originalArgsPreview: rawArgsStr.slice(0, 150),
-          normalizedArgsPreview: `Fallback bridged to run_code(tools.${exec.name})`,
+          normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
           status: bridgedResult.isError ? 'failed' : 'success',
+          errorMessage: resultErrorText(bridgedResult),
         })
         return bridgedResult
       }
@@ -207,7 +423,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         originalArgsPreview: rawArgsStr.slice(0, 150),
         normalizedArgsPreview: normalizedPreview,
         status: 'failed',
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: errorText(error) ?? String(error),
       })
       throw error
     }

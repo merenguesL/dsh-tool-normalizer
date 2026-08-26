@@ -28,8 +28,9 @@ function emptyStats(): NormalizerStats {
     healedSuccess: 0,
     healedFailed: 0,
     passThrough: 0,
+    passThroughFailed: 0,
     estimatedTokensSaved: 0,
-    healingSuccessRate: 100,
+    healingSuccessRate: 0,
     byTool: {},
     byCategory: {},
     recentRecords: [],
@@ -60,8 +61,15 @@ function coerceCounts(source: unknown): CountMap {
 }
 
 function coerceStats(stats: NormalizerStats): NormalizerStats {
+  const records = Array.isArray(stats.recentRecords) ? stats.recentRecords : []
+  const legacyHealedFailed = records.filter(record => record.wasHealed && record.status === 'failed').length
+  const legacyPassThroughFailed = records.filter(record => !record.wasHealed && record.status === 'failed').length
   return {
     ...stats,
+    healedFailed: typeof stats.passThroughFailed === 'number' ? stats.healedFailed : legacyHealedFailed,
+    passThroughFailed: typeof stats.passThroughFailed === 'number'
+      ? stats.passThroughFailed
+      : legacyPassThroughFailed,
     estimatedTokensSaved: typeof stats.estimatedTokensSaved === 'number' ? stats.estimatedTokensSaved : 0,
     byTool: coerceCounts(stats.byTool),
     byCategory: coerceCounts(stats.byCategory),
@@ -157,6 +165,11 @@ export class NormalizerStore {
   }
 
   public reset = (): void => {
+    if (typeof fetch === 'function') {
+      void fetch('/plugin-api/tool-normalizer/reset', { method: 'POST', cache: 'no-store' }).catch(() => {
+        // Older hosts have no reset route; the local view still clears safely.
+      })
+    }
     try {
       ToolNormalizerTracker.getInstance().reset()
     } catch {

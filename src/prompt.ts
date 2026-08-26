@@ -23,9 +23,15 @@ export function registerPromptGuidance(ctx: any): void {
   const systemPrompt = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : ctx.systemPrompt
   if (!systemPrompt || typeof systemPrompt.section !== 'function') return
 
-  systemPrompt.section({
+  const section = {
     name: TOOL_NORMALIZER_PROMPT_SECTION,
     order: 400,
     text: GUIDANCE_TEXT,
-  })
+  }
+  if (typeof ctx.effect === 'function') {
+    ctx.effect(() => systemPrompt.section(section), 'tool-normalizer: prompt guidance')
+  } else {
+    // Small test/legacy contexts may not expose Cordis effect ownership.
+    systemPrompt.section(section)
+  }
 }

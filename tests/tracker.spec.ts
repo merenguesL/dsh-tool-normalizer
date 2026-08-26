@@ -6,6 +6,7 @@ describe('ToolNormalizerTracker', () => {
 
   beforeEach(() => {
     tracker = ToolNormalizerTracker.getInstance()
+    tracker.setPersistPassthrough(false)
     tracker.reset()
   })
 
@@ -25,6 +26,7 @@ describe('ToolNormalizerTracker', () => {
     expect(snap.totalIntercepted).toBe(1)
     expect(snap.healedSuccess).toBe(1)
     expect(snap.healedFailed).toBe(0)
+    expect(snap.passThroughFailed).toBe(0)
     expect(snap.healingSuccessRate).toBe(100)
     expect(snap.byTool['run_code']).toBe(1)
     expect(snap.byCategory['INVALID_ARGS']).toBe(1)
@@ -57,6 +59,41 @@ describe('ToolNormalizerTracker', () => {
     expect(snap.totalIntercepted).toBe(2)
     expect(snap.healedSuccess).toBe(1)
     expect(snap.healedFailed).toBe(1)
+    expect(snap.passThroughFailed).toBe(0)
     expect(snap.healingSuccessRate).toBe(50.0)
+  })
+
+  it('keeps untouched failures out of healing failures and rate', () => {
+    tracker.record({
+      id: 'e1',
+      time: 1000,
+      toolName: 'bash',
+      category: 'PASSTHROUGH',
+      wasHealed: false,
+      originalArgsPreview: '{}',
+      status: 'failed',
+      errorMessage: 'tool failed',
+    })
+
+    const snap = tracker.getSnapshot()
+    expect(snap.healedFailed).toBe(0)
+    expect(snap.passThroughFailed).toBe(1)
+    expect(snap.healingSuccessRate).toBe(0)
+  })
+
+  it('keeps normal pass-through calls out of the detailed ring by default', () => {
+    tracker.setPersistPassthrough(false)
+    tracker.record({
+      id: 'e1',
+      time: 1000,
+      toolName: 'read',
+      category: 'PASSTHROUGH',
+      wasHealed: false,
+      originalArgsPreview: '{}',
+      status: 'passthrough',
+    })
+    expect(tracker.getSnapshot().totalIntercepted).toBe(1)
+    expect(tracker.getSnapshot().passThrough).toBe(1)
+    expect(tracker.getSnapshot().recentRecords).toHaveLength(0)
   })
 })

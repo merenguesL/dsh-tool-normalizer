@@ -1,12 +1,20 @@
 /**
- * Bridge for direct tool calls made when the agent is in Code-Mode.
+ * Safe recovery for a direct tool call that reached the extensible dispatch
+ * pipeline but was rejected as unknown by the host.
+ *
+ * The bridge deliberately re-enters `tools.execute()` as a nested dispatch.
+ * That preserves the host's result materialization, policy stages, agent
+ * scope, session ownership, cancellation, deferred contexts, and terminal
+ * result handling. Calling a definition's `execute()` method directly is not
+ * equivalent and is therefore not supported here.
  *
  * @module dsh-tool-normalizer/normalizers/direct-bridge
  */
 
+import { executeNestedTool, recoveryFailure } from './nested-dispatch.ts'
 import type { ToolDispatchExecution, ToolExecutionResult, ToolRuntime } from '../types.ts'
 
-/** Standard capabilities that can be auto-bridged into Code-Mode. */
+/** Standard capabilities that may be recovered when a host exposes them to the nested dispatcher. */
 const BRIDGEABLE_TOOLS = new Set([
   'bash',
   'read',
@@ -20,69 +28,48 @@ const BRIDGEABLE_TOOLS = new Set([
 ])
 
 /**
- * Checks whether a tool call can be bridged into `run_code`.
- * @param toolName - Name of the requested tool.
+ * Checks whether the host can recover this call through a nested standard
+ * dispatch. This is intentionally called only after an UNKNOWN_TOOL result;
+ * probing before `next()` would replace valid native calls in `both` mode.
+ *
+ * @param exec - Failed direct call and its scope metadata.
  * @param tools - Tool runtime registry.
- * @returns True if tool is bridgeable and `run_code` is available.
+ * @returns True when the target definition and nested dispatcher are present.
  */
-export function isBridgeableDirectCall(toolName: string, tools: ToolRuntime): boolean {
-  // If the tool is already registered directly, no need to bridge
-  if (tools.get(toolName) !== undefined) {
-    return false
-  }
+export function isBridgeableDirectCall(
+  exec: Pick<ToolDispatchExecution, 'name' | 'agent' | 'parent'>,
+  tools: ToolRuntime,
+): boolean {
+  if (exec.parent !== undefined || !BRIDGEABLE_TOOLS.has(exec.name)) return false
+  if (typeof tools.execute !== 'function') return false
 
-  // If run_code is registered and this is a standard bridgeable tool
-  return BRIDGEABLE_TOOLS.has(toolName) && tools.get('run_code') !== undefined
+  // The reserved transport is the only reliable plugin-visible indication
+  // that this deployment supports Code-Mode recovery. The target itself must
+  // also be visible in the same agent scope; an absent target cannot be made
+  // callable by fabricating a code snippet.
+  return tools.get('run_code', exec.agent) !== undefined
+    && tools.get(exec.name, exec.agent) !== undefined
 }
 
 /**
- * Synthesizes and executes a `run_code` call for a direct tool invocation.
+ * Re-dispatch the original call as a nested execution through the host API.
  *
- * @param exec - Direct tool dispatch execution.
+ * @param exec - Direct call that the surrounding pipeline could not resolve.
  * @param tools - Tool runtime service.
- * @returns Synthesized tool execution result.
+ * @returns The host-created canonical result, including contexts and terminal state.
  */
 export async function executeBridgeDirectCall(
   exec: ToolDispatchExecution,
   tools: ToolRuntime,
 ): Promise<ToolExecutionResult> {
-  const runCodeTool = tools.get('run_code')
-  if (!runCodeTool || typeof runCodeTool.execute !== 'function') {
-    return {
-      content: [{
-        type: 'text',
-        text: `Tool '${exec.name}' is not registered, and 'run_code' fallback is unavailable.`,
-      }],
-      isError: true,
-    }
+  if (typeof tools.execute !== 'function') {
+    return recoveryFailure(`Cannot recover '${exec.name}': the host tools.execute() dispatcher is unavailable.`)
   }
-
-  // Synthesize JavaScript snippet for Code-Mode invocation
-  const argsJson = JSON.stringify(exec.arguments ?? {})
-  const syntheticCode = `const result = await tools.${exec.name}(${argsJson});\nreturn result;`
-
-  const syntheticExec: ToolDispatchExecution = {
-    name: 'run_code',
-    arguments: {
-      description: `[Auto-Bridged] Execute ${exec.name} in Code-Mode`,
-      code: syntheticCode,
-    },
-    callId: exec.callId,
-    rootCallId: exec.rootCallId,
-    token: exec.token,
-    signal: exec.signal,
+  if (exec.signal === undefined) {
+    return recoveryFailure(`Cannot recover '${exec.name}': the original cancellation signal is unavailable.`)
   }
-
-  try {
-    return await runCodeTool.execute(syntheticExec)
-  } catch (error: unknown) {
-    return {
-      content: [{
-        type: 'text',
-        text: `Auto-bridged execution of '${exec.name}' failed: ${error instanceof Error ? error.message : String(error)}`,
-      }],
-      isError: true,
-      error: error instanceof Error ? error : new Error(String(error)),
-    }
+  if (exec.token === undefined) {
+    return recoveryFailure(`Cannot recover '${exec.name}': the original execution token is unavailable.`)
   }
+  return executeNestedTool(exec, tools, exec.name, exec.arguments ?? {}, `bridge-${exec.name}`)
 }

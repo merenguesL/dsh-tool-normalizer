@@ -16,15 +16,17 @@ export interface Config {
   autoWrapRunCode?: boolean
 
   /**
-   * Automatically bridge direct tool calls (e.g. `bash`, `read`, `write`, `grep`)
-   * when the agent is in Code-Mode and those tools are not exposed directly to the model.
+   * Automatically retry an UNKNOWN_TOOL result as a nested host dispatch when
+   * the direct call reached this plugin and the target is registered in the
+   * active agent scope. Calls rejected earlier by the host cannot be observed
+   * by a plugin.
    * @default true
    */
   autoBridgeDirectTools?: boolean
 
   /**
-   * Automatically pre-observe (read) files before `edit` operations if they haven't
-   * been read in the current turn, preventing `FS_NOT_OBSERVED` failures.
+   * When a guarded mutation returns `FS_NOT_OBSERVED`, read the target once and
+   * retry the same mutation through the host dispatcher.
    * @default true
    */
   autoObserveFiles?: boolean
@@ -49,6 +51,14 @@ export interface Config {
    * @default 8000
    */
   estimatedRetryTokenCost?: number
+
+  /**
+   * Persist successful calls that required no normalization in the detailed
+   * JSONL trace. Normal successful pass-through calls are aggregated in the
+   * compact summary file by default and are not written one per call.
+   * @default false
+   */
+  persistPassthrough?: boolean
 }
 
 /**
@@ -60,7 +70,20 @@ export type RawArguments = Record<string, unknown>
  * Minimal tool runtime contract.
  */
 export interface ToolRuntime {
-  get(name: string): any
+  get(name: string, scope?: unknown): unknown
+  /** Execute a call through the host runtime's complete dispatch pipeline. */
+  execute?(execution: ToolExecutionInput): Promise<ToolExecutionResult>
+}
+
+/** Minimal input accepted by the host runtime for a nested dispatch. */
+export interface ToolExecutionInput {
+  callId: string
+  rootCallId?: string
+  name: string
+  arguments: unknown
+  agent?: unknown
+  parent?: unknown
+  signal: AbortSignal
 }
 
 /**
@@ -68,10 +91,15 @@ export interface ToolRuntime {
  */
 export interface ToolDispatchExecution {
   name: string
-  arguments: any
+  arguments: unknown
   callId?: string
   rootCallId?: string
-  token?: string
+  /** Opaque runtime token used to mark a call as a nested dispatch. */
+  token?: unknown
+  /** Session/agent owner used by scoped tools and filesystem policy. */
+  agent?: unknown
+  /** Present when the host is already executing a nested call. */
+  parent?: unknown
   signal?: AbortSignal
 }
 
@@ -81,5 +109,9 @@ export interface ToolDispatchExecution {
 export interface ToolExecutionResult {
   content?: Array<{ type: string; text?: string; data?: string; mimeType?: string }>
   isError?: boolean
-  error?: Error | { message: string }
+  value?: unknown
+  meta?: unknown
+  additionalContexts?: unknown[]
+  concludesTurn?: true
+  error?: Error | { message: string; code?: string; info?: { code?: string } }
 }

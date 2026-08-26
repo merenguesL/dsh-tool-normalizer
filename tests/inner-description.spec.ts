@@ -52,4 +52,31 @@ describe('injectInnerDescriptions', () => {
     const res = injectInnerDescriptions(code, 'Read implementation doc')
     expect(res.injected).toBe(1)
   })
+
+  it('does not mistake strings, comments, or nested values for a description property', () => {
+    const code = [
+      'await tools.bash({ command: "description: fake", /* } */ value: /[{}]/ });',
+      'await tools.read({ value: "description: fake" });',
+    ].join('\n')
+    const res = injectInnerDescriptions(code, 'Inspect')
+    expect(res.injected).toBe(2)
+    expect(res.code.match(/description: "Inspect · (bash|read)"/g)).toHaveLength(2)
+  })
+
+  it('does not duplicate a shorthand description or a spread-provided description', () => {
+    const code = [
+      'await tools.bash({ description, command: "ls" });',
+      'await tools.read({ ...options, file_path: "x" });',
+    ].join('\n')
+    const res = injectInnerDescriptions(code, 'Inspect')
+    expect(res.injected).toBe(0)
+    expect(res.code).toBe(code)
+  })
+
+  it('does not scan regular expressions as executable object syntax', () => {
+    const code = 'const pattern = /tools\\.read\\(\\{ description: fake \\})/; await tools.bash({ command: "pwd" });'
+    const res = injectInnerDescriptions(code, 'Inspect')
+    expect(res.injected).toBe(1)
+    expect(res.code).toContain('description: "Inspect · bash"')
+  })
 })
