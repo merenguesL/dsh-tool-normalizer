@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 
 const packageRoot = resolve(import.meta.dirname, '..')
 const packageName = 'dsh-tool-normalizer'
+const packageVersion = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf-8')).version
 
 let build
 try {
@@ -83,6 +84,9 @@ await build({
   target: 'es2024',
   packages: 'external',
   sourcemap: false,
+  define: {
+    __DSH_TOOL_NORMALIZER_VERSION__: JSON.stringify(packageVersion),
+  },
   plugins: [await inlineCssModulePlugin()],
   banner: {
     js: `window.__ModuleLoader__.load({ id: ${JSON.stringify(packageName)}, factory: (require) => { var module = { exports: {} }; var exports = module.exports;`,

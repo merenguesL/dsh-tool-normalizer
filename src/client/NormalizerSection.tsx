@@ -168,7 +168,10 @@ export function NormalizerSection(props: NormalizerSectionProps): React.ReactEle
       {/* Header */}
       <header className={styles.header}>
         <div className={styles.titleGroup}>
-          <h2 className={styles.title}>{t('title')}</h2>
+          <div className={styles.titleRow}>
+            <h2 className={styles.title}>{t('title')}</h2>
+            <span className={styles.versionBadge} title="plugin version">v{__DSH_TOOL_NORMALIZER_VERSION__}</span>
+          </div>
           <p className={styles.subtitle}>{t('subtitle')}</p>
         </div>
         <div className={styles.headerActions}>

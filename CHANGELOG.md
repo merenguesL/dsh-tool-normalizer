@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-08-26
+
+### Added
+
+- **Version badge in the dashboard header**: the section title now carries a `v<version>` pill so an installed copy's exact build is visible at a glance. The version is injected into the client bundle at build time from `package.json` (`scripts/build.mjs` esbuild `define`), so it can never drift from the published release.
+
 ## [0.1.6] - 2026-08-26
 
 ### Removed
