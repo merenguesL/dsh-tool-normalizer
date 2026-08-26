@@ -14,17 +14,19 @@ export interface NormalizerSectionInjected {
   t: (key: NormalizerKey) => string
 }
 
-export interface NormalizerSectionProps {
-  injected?: NormalizerSectionInjected
-}
+/**
+ * Full component props: the slot renderer spreads the registrant's inject
+ * face ({@link NormalizerSectionInjected}) as TOP-LEVEL props — there is no
+ * nested `injected` prop. All members stay optional so storybook-style
+ * renders without injection fall back to the built-in zh copy.
+ */
+export interface NormalizerSectionProps extends Partial<NormalizerSectionInjected> {}
 
-export function NormalizerSection({ injected }: NormalizerSectionProps): React.ReactElement {
-  const controller = injected?.controller
+export function NormalizerSection(props: NormalizerSectionProps): React.ReactElement {
+  const controller = props.controller
   const t = (k: NormalizerKey): string => {
-    if (injected?.t) {
-      const v = injected.t(k)
-      if (v && v !== k) return v
-    }
+    const v = props.t?.(k)
+    if (v && v !== k) return v
     return zh[k] || k
   }
 

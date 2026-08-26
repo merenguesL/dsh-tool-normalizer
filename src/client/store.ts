@@ -16,6 +16,38 @@ export interface NormalizerState {
 
 const STORAGE_KEY = 'dsh_tool_normalizer_stats_v1'
 
+/** Per-key counter view the UI consumes: one plain number per key. */
+type CountMap = Record<string, number>
+
+/**
+ * Coerce a stats object whose `byTool`/`byCategory` members may be either
+ * plain numbers (store-produced) or tracker counter objects
+ * (`{ intercepted, healed, failed }` / `{ count, healed }`) into the flat
+ * numeric maps the UI ranks and renders.
+ */
+function coerceCounts(source: unknown): CountMap {
+  if (source === null || typeof source !== 'object') return {}
+  const out: CountMap = {}
+  for (const [key, value] of Object.entries(source as Record<string, unknown>)) {
+    if (typeof value === 'number') out[key] = value
+    else if (value !== null && typeof value === 'object') {
+      const counter = value as { intercepted?: unknown; count?: unknown }
+      out[key] = typeof counter.intercepted === 'number'
+        ? counter.intercepted
+        : typeof counter.count === 'number' ? counter.count : 0
+    }
+  }
+  return out
+}
+
+function coerceStats(stats: NormalizerStats): NormalizerStats {
+  return {
+    ...stats,
+    byTool: coerceCounts(stats.byTool),
+    byCategory: coerceCounts(stats.byCategory),
+  }
+}
+
 const INITIAL_RECORDS: NormalizerRecord[] = [
   {
     id: 'norm_init_01',
@@ -81,7 +113,7 @@ export class NormalizerStore {
 
     this.current = {
       status: 'ready',
-      stats: (trackerSnapshot.totalIntercepted > 0 ? trackerSnapshot : (saved ?? {
+      stats: coerceStats(trackerSnapshot.totalIntercepted > 0 ? trackerSnapshot : (saved ?? {
         totalIntercepted: 118,
         healedSuccess: 112,
         healedFailed: 6,
@@ -114,7 +146,7 @@ export class NormalizerStore {
 
   public subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return () => { this.listeners.delete(listener) }
   }
 
   public setActiveTab = (tab: 'live' | 'analytics' | 'rules'): void => {
@@ -137,7 +169,7 @@ export class NormalizerStore {
       const tracker = ToolNormalizerTracker.getInstance()
       const liveSnapshot = tracker.getSnapshot()
       if (liveSnapshot.totalIntercepted > 0) {
-        this.current.stats = liveSnapshot
+        this.current.stats = coerceStats(liveSnapshot)
         this.saveToStorage()
       } else {
         this.recalculateStats()

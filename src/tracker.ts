@@ -28,8 +28,10 @@ export interface NormalizerStats {
   healedFailed: number
   passThrough: number
   healingSuccessRate: number // 0 - 100
-  byTool: Record<string, { intercepted: number; healed: number; failed: number }>
-  byCategory: Record<string, { count: number; healed: number }>
+  /** Per-tool intercepted-call totals; the UI ranks and renders these directly. */
+  byTool: Record<string, number>
+  /** Per-category event totals; the UI ranks and renders these directly. */
+  byCategory: Record<string, number>
   recentRecords: NormalizerRecord[]
 }
 
@@ -43,8 +45,8 @@ export class ToolNormalizerTracker {
   private healedSuccess = 0
   private healedFailed = 0
   private passThrough = 0
-  private byTool: Record<string, { intercepted: number; healed: number; failed: number }> = {}
-  private byCategory: Record<string, { count: number; healed: number }> = {}
+  private byTool: Record<string, number> = {}
+  private byCategory: Record<string, number> = {}
   private records: NormalizerRecord[] = []
   private maxRecords = 200
 
@@ -69,21 +71,10 @@ export class ToolNormalizerTracker {
     }
 
     // Tool breakdown
-    if (!this.byTool[record.toolName]) {
-      this.byTool[record.toolName] = { intercepted: 0, healed: 0, failed: 0 }
-    }
-    const toolStat = this.byTool[record.toolName]!
-    toolStat.intercepted++
-    if (record.status === 'success' && record.wasHealed) toolStat.healed++
-    if (record.status === 'failed') toolStat.failed++
+    this.byTool[record.toolName] = (this.byTool[record.toolName] ?? 0) + 1
 
     // Category breakdown
-    if (!this.byCategory[record.category]) {
-      this.byCategory[record.category] = { count: 0, healed: 0 }
-    }
-    const catStat = this.byCategory[record.category]!
-    catStat.count++
-    if (record.status === 'success' && record.wasHealed) catStat.healed++
+    this.byCategory[record.category] = (this.byCategory[record.category] ?? 0) + 1
 
     // Ring buffer for recent records
     this.records.unshift(record)

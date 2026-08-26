@@ -26,8 +26,8 @@ describe('ToolNormalizerTracker', () => {
     expect(snap.healedSuccess).toBe(1)
     expect(snap.healedFailed).toBe(0)
     expect(snap.healingSuccessRate).toBe(100)
-    expect(snap.byTool['run_code']?.healed).toBe(1)
-    expect(snap.byCategory['INVALID_ARGS']?.healed).toBe(1)
+    expect(snap.byTool['run_code']).toBe(1)
+    expect(snap.byCategory['INVALID_ARGS']).toBe(1)
     expect(snap.recentRecords.length).toBe(1)
   })
 
