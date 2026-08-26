@@ -11,7 +11,6 @@ export const zh = {
   refresh: '刷新数据',
   clear: '清空记录',
   export: '导出诊断报告',
-  simulate: '模拟测试自愈',
   
   // Tabs
   tabLive: '实时拦截流水',
@@ -34,7 +33,6 @@ export const zh = {
   statusSuccess: '自愈成功',
   statusFailed: '执行失败',
   statusPassthrough: '正常放行',
-  statusSimulated: '模拟自愈',
 
   // Category Labels
   catInvalidArgs: '参数缺失/错位 (INVALID_ARGS)',
