@@ -116,19 +116,43 @@ export class NormalizerStore {
   }
 
   /** Adopt the freshest available snapshot; keeps the newest non-empty source. */
+  /** Adopt the freshest available snapshot: host feed first, tracker fallback. */
   public refresh = (): void => {
-    try {
-      const liveSnapshot = ToolNormalizerTracker.getInstance().getSnapshot()
-      if (liveSnapshot.totalIntercepted > 0 || this.current.stats.totalIntercepted === 0) {
+    void this.refreshAsync()
+  }
+
+  private refreshAsync = async (): Promise<void> => {
+    let adoptedFromFeed = false
+    // Same-origin host feed (registered by the plugin's node half). The
+    // server snapshot is authoritative whenever it answers with valid data.
+    if (typeof fetch === 'function') {
+      try {
+        const res = await fetch('/plugin-api/tool-normalizer/stats', { cache: 'no-store' })
+        if (res.ok) {
+          const data = (await res.json()) as unknown
+          if (isPersistedStats(data)) {
+            this.current.stats = coerceStats(data)
+            this.saveToStorage()
+            adoptedFromFeed = true
+          }
+        }
+      } catch {
+        // Endpoint absent (older host, deployment without the webserver):
+        // fall through to the local sources below.
+      }
+    }
+    if (!adoptedFromFeed) {
+      try {
+        const liveSnapshot = ToolNormalizerTracker.getInstance().getSnapshot()
         if (liveSnapshot.totalIntercepted > this.current.stats.totalIntercepted) {
           this.current.stats = coerceStats(liveSnapshot)
           this.saveToStorage()
         }
+      } catch {
+        // Tracker unavailable in this environment; keep current view.
       }
-      this.current.status = 'ready'
-    } catch {
-      this.current.status = 'ready'
     }
+    this.current.status = 'ready'
     this.notify()
   }
 

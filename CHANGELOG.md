@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-26
+
+### Added
+
+- **Durable JSONL event history**: every interception appends one line to \`~/.dsh/tool-normalizer-events.jsonl\` — O(1) appends with no record ceiling; boot-time replay rebuilds cumulative aggregates so statistics and the token-savings projection accumulate across restarts.
+- **Dashboard live feed**: the node half registers `GET /plugin-api/tool-normalizer/stats` (same-origin, optional-service: deployments without a webserver load fine), and the panel's refresh now adopts that authoritative snapshot — the dashboard finally shows real server-side data.
+
+### Changed
+
+- Replaced the bounded JSON snapshot mirror (`tool-normalizer-stats.json`) with the append-only event log; the old file can be deleted.
+- The in-memory record window widened to 1000 for dashboard transport; full history lives only in the log.
+
 ## [0.1.9] - 2026-08-26
 
 ### Changed

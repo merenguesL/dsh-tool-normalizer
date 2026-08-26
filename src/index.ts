@@ -8,7 +8,7 @@ import { executeBridgeDirectCall, isBridgeableDirectCall } from './normalizers/d
 import { normalizeEditorArguments } from './normalizers/range-clamper.ts'
 import { normalizeRunCodeArguments } from './normalizers/run-code.ts'
 import { registerPromptGuidance } from './prompt.ts'
-import { persistSnapshotSoon, statsFilePath } from './stats-file.ts'
+import { appendEvent, restoreFromLog, setRetryTokenCost, statsLogPath } from './stats-log.ts'
 import { ToolNormalizerTracker } from './tracker.ts'
 import type { Config, ToolDispatchExecution, ToolExecutionResult } from './types.ts'
 
@@ -42,19 +42,34 @@ export function apply(ctx: any, userConfig: Config = {}): void {
   }
 
   const tracker = ToolNormalizerTracker.getInstance()
+  setRetryTokenCost(config.estimatedRetryTokenCost)
+  void restoreFromLog(tracker)
 
-  /** Record one real event and mirror the aggregate snapshot to disk. */
+  /** Record one real event, append it to the durable log, and log a line. */
   const recordEvent = (record: Parameters<typeof tracker.record>[0]): void => {
     tracker.record(record)
-    if (record.status === 'success' && record.wasHealed) {
-      tracker.addEstimatedTokensSaved(config.estimatedRetryTokenCost)
-    }
-    persistSnapshotSoon(tracker)
+    appendEvent(record)
     ctx.logger?.debug?.(
       `[tool-normalizer] ${record.toolName} category=${record.category} healed=${record.wasHealed} status=${record.status}`,
     )
   }
-  ctx.logger?.info?.(`[tool-normalizer] active — intercepting tools/execute; stats mirror: ${statsFilePath()}`)
+  ctx.logger?.info?.(`[tool-normalizer] active — intercepting tools/execute; history log: ${statsLogPath()}`)
+
+  // Optional HTTP feed for the browser dashboard: same-origin GET returning
+  // the live in-memory snapshot. Optional-service discipline: resolved via
+  // ctx.get so deployments without a webserver load fine without the feed.
+  const webServer = typeof ctx.get === 'function' ? ctx.get('webServer') : ctx.webServer
+  if (webServer && typeof webServer.register === 'function') {
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/plugin-api/tool-normalizer/stats',
+      handler: (_req: unknown, res: { writeHead(status: number, headers: Record<string, string>): void; end(body: string): void }) => {
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+        res.end(JSON.stringify(tracker.getSnapshot()))
+      },
+    }), 'tool-normalizer: stats http route')
+    ctx.logger?.info?.('[tool-normalizer] stats feed at GET /plugin-api/tool-normalizer/stats')
+  }
 
   // Register dynamic prompt guidelines safely
   if (config.injectPrompt) {

@@ -1,6 +1,11 @@
 /**
  * In-memory statistics and audit tracker for tool normalization events.
  *
+ * Counters are cumulative for the process lifetime; the durable event history
+ * lives in the JSONL log (see `stats-log.ts`) whose replay rebuilds these
+ * aggregates across restarts. The in-memory record ring is a bounded window
+ * for dashboard transport only — it is NOT the history boundary.
+ *
  * @module dsh-tool-normalizer/tracker
  */
 
@@ -51,7 +56,9 @@ export class ToolNormalizerTracker {
   private byTool: Record<string, number> = {}
   private byCategory: Record<string, number> = {}
   private records: NormalizerRecord[] = []
-  private maxRecords = 200
+  /** Dashboard transport window; the JSONL log holds the unbounded history. */
+  private maxRecords = 1000
+  private retryTokenCost = 0
 
   public static getInstance(): ToolNormalizerTracker {
     if (!ToolNormalizerTracker.instance) {
@@ -79,6 +86,11 @@ export class ToolNormalizerTracker {
     // Category breakdown
     this.byCategory[record.category] = (this.byCategory[record.category] ?? 0) + 1
 
+    // Token-savings projection accrues with the healed event itself
+    if (record.status === 'success' && record.wasHealed && this.retryTokenCost > 0) {
+      this.estimatedTokensSaved += Math.round(this.retryTokenCost)
+    }
+
     // Ring buffer for recent records
     this.records.unshift(record)
     if (this.records.length > this.maxRecords) {
@@ -87,13 +99,27 @@ export class ToolNormalizerTracker {
   }
 
   /**
-   * Accumulate the projected token savings for one successfully healed call.
-   * Non-finite or non-positive costs are ignored.
+   * Set the per-healed-call token-cost estimate used by the projection.
+   * Non-finite or non-positive values disable the projection.
    */
-  public addEstimatedTokensSaved(cost: number): void {
-    if (Number.isFinite(cost) && cost > 0) {
-      this.estimatedTokensSaved += Math.round(cost)
-    }
+  public setRetryTokenCost(cost: number): void {
+    this.retryTokenCost = Number.isFinite(cost) && cost > 0 ? cost : 0
+  }
+
+  /**
+   * Rebuild aggregates from a replayed history (JSONL log restore). Counters
+   * and maps are replaced wholesale; the record ring keeps the newest window
+   * of the supplied events.
+   */
+  public restore(stats: NormalizerStats): void {
+    this.totalIntercepted = stats.totalIntercepted
+    this.healedSuccess = stats.healedSuccess
+    this.healedFailed = stats.healedFailed
+    this.passThrough = stats.passThrough
+    this.estimatedTokensSaved = stats.estimatedTokensSaved
+    this.byTool = { ...stats.byTool }
+    this.byCategory = { ...stats.byCategory }
+    this.records = [...stats.recentRecords].sort((a, b) => b.time - a.time).slice(0, this.maxRecords)
   }
 
   /**

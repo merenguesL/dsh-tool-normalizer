@@ -66,8 +66,9 @@ Detailed root-cause analysis identified four primary structural error drivers:
   - Clamps inverted or out-of-bounds `view_range` parameters in `str_replace_editor`.
   - Resolves relative file paths to absolute paths against the session root.
 - 📈 **Projected Token Savings**:
-  - Estimates the input tokens avoided by each successful healing (`healedSuccess × estimatedRetryTokenCost`), shown in the dashboard and the on-disk stats mirror, clearly labeled as an estimate.
-  - Live observability: every interception logs a server-side debug line, and the aggregate snapshot mirrors to \`~/.dsh/tool-normalizer-stats.json\`.
+  - Estimates the input tokens avoided by each successful healing (`healedSuccess × estimatedRetryTokenCost`), shown in the dashboard, clearly labeled as an estimate.
+  - Live observability: every interception logs a server-side debug line, and appends one JSONL event to `~/.dsh/tool-normalizer-events.jsonl` — unbounded history with O(1) appends, replayed at boot so statistics accumulate across restarts.
+  - The dashboard reads live data from the same-origin feed `GET /plugin-api/tool-normalizer/stats`, registered by the node half when a webserver is present.
 - 📊 **Web UI Execution & Diagnostics Dashboard**:
   - Embedded directly into DSH's **Settings (`settings.section`)** panel.
   - Displays real-time KPI metrics (Total Interceptions, Auto-Healed Count, Healing Success Rate %, Unrecovered Errors).
