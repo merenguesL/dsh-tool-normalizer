@@ -29,7 +29,7 @@ export const zh = {
   kpiFailed: '未恢复异常',
   kpiFailedDesc: '自愈失败与未修改调用的底层错误',
   kpiSavedTokens: '预估节省Token',
-  kpiSavedTokensDesc: '自愈次数 × 单次重试估算成本（可在插件配置调整）',
+  kpiSavedTokensDesc: '按 token-meter 实测请求压力量 × 跳过模型回环数累计（未挂载则为 0）',
   estimateBadge: '估算值',
 
   // Status Labels

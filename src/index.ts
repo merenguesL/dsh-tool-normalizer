@@ -17,10 +17,9 @@ import {
   flushStatsLog,
   persistSnapshot,
   restoreFromLog,
-  setRetryTokenCost,
   statsLogPath,
 } from './stats-log.ts'
-import { ToolNormalizerTracker } from './tracker.ts'
+import { ToolNormalizerTracker, type NormalizerCategory } from './tracker.ts'
 import type { Config, ToolDispatchExecution, ToolExecutionResult } from './types.ts'
 
 export * from './types.ts'
@@ -220,6 +219,57 @@ function getToolRuntime(ctx: any): any {
   return typeof ctx.get === 'function' ? ctx.get('tools') : ctx.tools
 }
 
+/** Shape of the optional session token-meter service read at dispatch time. */
+interface SessionTokenMeter {
+  measure(session: unknown, requestHeader?: unknown): { totalTokens?: number } | undefined
+}
+
+/**
+ * Number of extra model round-trips a successful heal removes. `FS_OBSERVED`
+ * replaces one read turn plus one re-edit turn; every argument normalization
+ * skips the single turn that would have resent the corrected call.
+ */
+function avoidedRoundTrips(category: NormalizerCategory): number {
+  if (category === 'FS_OBSERVED') return 2
+  if (category === 'UNKNOWN_TOOL'
+    || category === 'INVALID_ARGS'
+    || category === 'RANGE_CLAMP'
+    || category === 'CODE_WRAP'
+    || category === 'RUN_CODE_DESC'
+    || category === 'INNER_DESC') return 1
+  return 0
+}
+
+/**
+ * Resolve the token-meter service lazily. It is optional across compositions
+ * (compaction-oriented ones mount it), so the metric must degrade instead of
+ * failing plugin load.
+ */
+function readTokenMeter(ctx: any): SessionTokenMeter | undefined {
+  const meter = typeof ctx.get === 'function' ? ctx.get('tokenMeter') : ctx.tokenMeter
+  return meter !== undefined && typeof meter.measure === 'function' ? meter as SessionTokenMeter : undefined
+}
+
+/**
+ * Measured input tokens a healed call avoids: the owning session's one-request
+ * context pressure times the skipped round-trips. Returns 0 when the meter or
+ * the owning session is unavailable, so an unmetered composition reports no
+ * savings rather than a fabricated constant.
+ */
+function measureTokensSaved(meter: SessionTokenMeter | undefined, agent: unknown, roundTrips: number): number {
+  if (roundTrips <= 0 || meter === undefined) return 0
+  const session = objectValue(agent)?.['session']
+  if (session === undefined) return 0
+  try {
+    const total = meter.measure(session)?.totalTokens
+    if (typeof total !== 'number' || !Number.isSafeInteger(total) || total <= 0) return 0
+    return total * roundTrips
+  } catch {
+    // Measurement is diagnostic only; never disturb the executing call.
+    return 0
+  }
+}
+
 /**
  * Applies the tool normalizer and auto-healing plugin.
  *
@@ -233,14 +283,11 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     autoObserveFiles: userConfig.autoObserveFiles ?? true,
     autoClampRanges: userConfig.autoClampRanges ?? true,
     injectPrompt: userConfig.injectPrompt ?? true,
-    estimatedRetryTokenCost: userConfig.estimatedRetryTokenCost ?? 8000,
     persistPassthrough: userConfig.persistPassthrough ?? false,
   }
 
   const tracker = ToolNormalizerTracker.getInstance()
   tracker.setPersistPassthrough(config.persistPassthrough)
-  tracker.setRetryTokenCost(config.estimatedRetryTokenCost)
-  setRetryTokenCost(config.estimatedRetryTokenCost)
   const restoreReady = restoreFromLog(tracker)
     .catch((error: unknown) => {
       ctx.logger?.warn?.(`[tool-normalizer] history restore failed: ${errorText(error) ?? String(error)}`)
@@ -324,6 +371,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
   }
 
   const getTools = () => getToolRuntime(ctx)
+  const getMeter = () => readTokenMeter(ctx)
 
   // Intercept and normalize tool dispatches
   ctx.on('tools/execute', async (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>): Promise<ToolExecutionResult> => {
@@ -332,6 +380,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     const startTime = Date.now()
     const eventId = `norm_${startTime}_${Math.random().toString(36).slice(2, 8)}`
     const tools = getTools()
+    const meter = getMeter()
+    const savedTokens = (healed: boolean, ok: boolean, category: NormalizerCategory): number =>
+      healed && ok ? measureTokensSaved(meter, exec.agent, avoidedRoundTrips(category)) : 0
 
     let wasHealed = false
     let healCategory: 'INVALID_ARGS' | 'RANGE_CLAMP' | 'CODE_WRAP' | 'RUN_CODE_DESC' | 'INNER_DESC' | 'FS_OBSERVED' | 'PASSTHROUGH' = 'PASSTHROUGH'
@@ -422,6 +473,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
           status: result.isError ? 'failed' : 'success',
           errorMessage: resultErrorText(result),
+          tokensSaved: savedTokens(true, !result.isError, 'UNKNOWN_TOOL'),
         })
         return result
       }
@@ -465,6 +517,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         normalizationSummary: changes.length > 0 ? changes.join('；') : undefined,
         status: result.isError ? 'failed' : (wasHealed ? 'success' : 'passthrough'),
         errorMessage: resultErrorText(result),
+        tokensSaved: savedTokens(wasHealed, !result.isError, healCategory),
       })
       return result
     } catch (error: unknown) {
@@ -489,6 +542,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
           status: bridgedResult.isError ? 'failed' : 'success',
           errorMessage: resultErrorText(bridgedResult),
+          tokensSaved: savedTokens(true, !bridgedResult.isError, 'UNKNOWN_TOOL'),
         })
         return bridgedResult
       }

@@ -70,7 +70,7 @@ Detailed root-cause analysis identified four primary structural error drivers:
 - 🩹 **Observe-then-Retry Recovery**:
   - Only after `FS_NOT_OBSERVED` does the plugin read the target and retry the mutation once through the host dispatcher; normal calls do not pay for a speculative read.
 - 📈 **Projected Token Savings**:
-  - Estimates the input tokens avoided by each successful healing (`healedSuccess × estimatedRetryTokenCost`), shown in the dashboard, clearly labeled as an estimate.
+  - Measures the input tokens each successful healing avoids from the host's token-meter: the session's one-request context pressure multiplied by the skipped model round-trips, shown in the dashboard. A composition without `@deepseek-ai/dsh-token-meter` reports zero instead of guessing.
   - Live observability: every interception updates aggregate counters. Healing attempts and failures append detailed JSONL events to `~/.dsh/tool-normalizer-events.jsonl`; successful untouched pass-through calls are aggregated in `tool-normalizer-summary.json` by default instead of expanding the detail log.
   - Diagnostic previews keep both the beginning and end of long arguments and include a bounded summary of the fields or dispatch path that changed.
   - The dashboard reads live data from the same-origin feed `GET /plugin-api/tool-normalizer/stats`, registered by the node half when a webserver is present.
@@ -147,7 +147,6 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
         autoObserveFiles: true
         autoClampRanges: true
         injectPrompt: true
-        estimatedRetryTokenCost: 8000
         persistPassthrough: false
 ```
 
@@ -158,10 +157,11 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
 | `autoObserveFiles` | `boolean` | `true` | After `FS_NOT_OBSERVED`, read the target and retry one edit/write through the host dispatcher. |
 | `autoClampRanges` | `boolean` | `true` | Correct editor ranges and resolve relative paths against the session directory. |
 | `injectPrompt` | `boolean` | `true` | Dynamically register prompt guidelines with `ctx.systemPrompt`. Static text only — never breaks prefix caching. |
-| `estimatedRetryTokenCost` | `number` | `8000` | Estimated input tokens of one avoided retry; drives the dashboard's token-savings projection (labeled as an estimate). |
 | `persistPassthrough` | `boolean` | `false` | Persist successful untouched pass-through calls as detailed JSONL events; failures and healing attempts are always retained. |
 
 Healing success rate is `healedSuccess / (healedSuccess + healedFailed)` and excludes untouched pass-through failures. Successful untouched calls are kept in aggregate counters and the compact `tool-normalizer-summary.json`, not one detail line per call.
+
+The token-savings KPI sums measured per-heal input tokens: each successful heal credits `skipped model round-trips × token-meter request pressure`, i.e. the prompt a further request would have re-submitted. It requires `@deepseek-ai/dsh-token-meter` in the composition; without it the figure stays `0` instead of using a hardcoded per-retry constant.
 
 ---
 

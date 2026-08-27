@@ -55,9 +55,6 @@ const CATEGORIES = new Set<NormalizerRecord['category']>([
 
 const STATUSES = new Set<NormalizerRecord['status']>(['success', 'failed', 'passthrough'])
 
-/** Per-healed-call cost estimate; set at apply time so replay matches live accounting. */
-let retryTokenCost = 0
-
 /** Serialized file operations prevent reset, append, and summary writes from overtaking each other. */
 let writeQueue: Promise<void> = Promise.resolve()
 let pendingSummary: PersistedAggregate | undefined
@@ -70,11 +67,6 @@ let writeGeneration = 0
  */
 function isTestRun(): boolean {
   return process.env['VITEST'] !== undefined || process.env['NODE_ENV'] === 'test'
-}
-
-/** Configure the projection cost before replay and live accounting. */
-export function setRetryTokenCost(cost: number): void {
-  retryTokenCost = Number.isFinite(cost) && cost > 0 ? Math.round(cost) : 0
 }
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
@@ -101,6 +93,7 @@ function validRecord(value: unknown): value is NormalizerRecord {
   if (value.normalizedArgsPreview !== undefined && typeof value.normalizedArgsPreview !== 'string') return false
   if (value.normalizationSummary !== undefined && typeof value.normalizationSummary !== 'string') return false
   if (value.errorMessage !== undefined && typeof value.errorMessage !== 'string') return false
+  if (value.tokensSaved !== undefined && !nonNegativeCount(value.tokensSaved)) return false
   return true
 }
 
@@ -175,12 +168,16 @@ function aggregateFromRecords(records: readonly NormalizerRecord[]): PersistedAg
   }
   const byTool: Record<string, number> = Object.create(null) as Record<string, number>
   const byCategory: Record<string, number> = Object.create(null) as Record<string, number>
-  for (const record of records) accumulateRecord(totals, byTool, byCategory, record)
+  let estimatedTokensSaved = 0
+  for (const record of records) {
+    accumulateRecord(totals, byTool, byCategory, record)
+    estimatedTokensSaved += record.tokensSaved ?? 0
+  }
   return {
     version: SUMMARY_VERSION,
     updatedAt: Date.now(),
     ...totals,
-    estimatedTokensSaved: totals.healedSuccess * retryTokenCost,
+    estimatedTokensSaved,
     byTool,
     byCategory,
   }
@@ -195,7 +192,7 @@ function snapshotAggregate(stats: NormalizerStats): PersistedAggregate {
     healedFailed: stats.healedFailed,
     passThrough: stats.passThrough,
     passThroughFailed: stats.passThroughFailed,
-    estimatedTokensSaved: stats.healedSuccess * retryTokenCost,
+    estimatedTokensSaved: stats.estimatedTokensSaved,
     byTool: { ...stats.byTool },
     byCategory: { ...stats.byCategory },
   }
@@ -241,7 +238,7 @@ export async function restoreFromLog(tracker: ToolNormalizerTracker): Promise<vo
     healedFailed: aggregate.healedFailed,
     passThrough: aggregate.passThrough,
     passThroughFailed: aggregate.passThroughFailed,
-    estimatedTokensSaved: aggregate.healedSuccess * retryTokenCost,
+    estimatedTokensSaved: aggregate.estimatedTokensSaved,
     healingSuccessRate: healingRate(aggregate),
     byTool: safeCountMap(aggregate.byTool),
     byCategory: safeCountMap(aggregate.byCategory),

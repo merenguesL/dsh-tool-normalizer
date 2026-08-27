@@ -141,7 +141,6 @@ pnpm dsh web
         autoObserveFiles: true
         autoClampRanges: true
         injectPrompt: true
-        estimatedRetryTokenCost: 8000
         persistPassthrough: false
 ```
 
@@ -152,10 +151,11 @@ pnpm dsh web
 | `autoObserveFiles` | `boolean` | `true` | 仅在收到 `FS_NOT_OBSERVED` 后读取目标并重试一次编辑/写入 |
 | `autoClampRanges` | `boolean` | `true` | 修正编辑器范围并将相对路径转为当前会话目录下的绝对路径 |
 | `injectPrompt` | `boolean` | `true` | 动态向 `systemPrompt` 注册极简工具最佳实践提示词（静态文本，不影响前缀缓存命中） |
-| `estimatedRetryTokenCost` | `number` | `8000` | 单次避免失败重试的估算 input token 成本；驱动看板的"预估节省Token"指标（明确标注为估算值） |
 | `persistPassthrough` | `boolean` | `false` | 是否将未修改且成功的正常放行调用逐条写入 JSONL；默认仅保留聚合计数，失败和自愈事件仍保留明细 |
 
 成功率只计算实际发生修复/恢复尝试的调用：`healedSuccess / (healedSuccess + healedFailed)`。正常成功放行不会进入详细 JSONL，以避免日志被高频健康调用淹没；其计数写入同目录的 `tool-normalizer-summary.json`。
+
+"预估节省 Token"KPI 为每次成功自愈累计的**实测**输入 token：每次修复记为「跳过的模型回环数 × token-meter 请求压力量」（即再多一次请求需重新提交的整段提示词）。它依赖组合中的 `@deepseek-ai/dsh-token-meter`；未挂载时该统计保持为 `0`，不再使用硬编码的单次重试成本。
 
 流水明细对长参数只保留首尾预览，并额外显示实际修改的字段或恢复路径，避免新增字段位于截断区域时看起来没有变化。
 

@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-08-27
+
+### Changed
+
+- **Measured token-savings projection**: the dashboard's "预估节省Token" KPI now sums tokens measured at heal time from the host `ctx.tokenMeter` — one-request context pressure times the model round-trips each heal skips (`FS_OBSERVED` counts two, every argument normalization counts one) — instead of `healedSuccess × estimatedRetryTokenCost`. The `estimatedRetryTokenCost` config is removed; the per-event `tokensSaved` figure is persisted to the JSONL log, so replay across restarts reconstructs the same total. A composition without `@deepseek-ai/dsh-token-meter` reports `0` rather than guessing.
+
 ## [0.3.3] - 2026-08-26
 
 ### Fixed

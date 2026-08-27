@@ -41,6 +41,7 @@ function createMockContext() {
 describe('dsh-tool-normalizer plugin', () => {
   it('intercepts run_code calls and auto-fixes command argument', async () => {
     const ctx = createMockContext()
+    ;(ctx as any).tokenMeter = { measure: vi.fn(() => ({ totalTokens: 12345 })) }
     ctx.tools.get.mockImplementation((name: string) => name === 'bash'
       ? { name, parameters: { type: 'object', required: ['command', 'description'] } }
       : undefined)
@@ -53,6 +54,7 @@ describe('dsh-tool-normalizer plugin', () => {
       callId: 'c1',
       rootCallId: 'c1',
       token: 'tok',
+      agent: { session: { header: { cwd: '/workspace' }, events: [] } },
       signal: new AbortController().signal,
     }
 
@@ -69,7 +71,8 @@ describe('dsh-tool-normalizer plugin', () => {
     // bash declares description as required, so the generated sub-dispatch
     // receives the missing field as well.
     expect(healedCode).toContain('description:')
-    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(8000)
+    // One skipped round-trip × the meter's measured request pressure.
+    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(12345)
   })
 
   it('injects inner descriptions only for tools whose active schema requires them', async () => {

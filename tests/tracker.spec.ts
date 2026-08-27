@@ -7,7 +7,6 @@ describe('ToolNormalizerTracker', () => {
   beforeEach(() => {
     tracker = ToolNormalizerTracker.getInstance()
     tracker.setPersistPassthrough(false)
-    tracker.setRetryTokenCost(0)
     tracker.reset()
   })
 
@@ -98,18 +97,44 @@ describe('ToolNormalizerTracker', () => {
     expect(tracker.getSnapshot().recentRecords).toHaveLength(0)
   })
 
-  it('projects configured retry token cost for healed calls', () => {
-    tracker.setRetryTokenCost(8000)
+  it('accumulates the measured tokens-saved figure from healed records', () => {
     tracker.record({
       id: 'e1',
       time: 1000,
       toolName: 'run_code',
-      category: 'RUN_CODE_DESC',
+      category: 'FS_OBSERVED',
       wasHealed: true,
       originalArgsPreview: '{}',
       status: 'success',
+      tokensSaved: 42000,
     })
 
-    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(8000)
+    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(42000)
+  })
+
+  it('ignores failed heal attempts and unhealed events for token savings', () => {
+    tracker.record({
+      id: 'e1',
+      time: 1000,
+      toolName: 'run_code',
+      category: 'INVALID_ARGS',
+      wasHealed: true,
+      originalArgsPreview: '{}',
+      status: 'failed',
+      errorMessage: 'syntax error',
+      tokensSaved: 100,
+    })
+    tracker.record({
+      id: 'e2',
+      time: 2000,
+      toolName: 'read',
+      category: 'PASSTHROUGH',
+      wasHealed: false,
+      originalArgsPreview: '{}',
+      status: 'passthrough',
+      tokensSaved: 999,
+    })
+
+    expect(tracker.getSnapshot().estimatedTokensSaved).toBe(0)
   })
 })

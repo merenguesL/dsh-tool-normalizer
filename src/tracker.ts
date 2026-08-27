@@ -34,6 +34,11 @@ export interface NormalizerRecord {
   normalizationSummary?: string
   status: 'success' | 'failed' | 'passthrough'
   errorMessage?: string
+  /**
+   * Measured input tokens this healed call avoided, already multiplied by the
+   * skipped model round-trips. Absent for unhealed or unmetered events.
+   */
+  tokensSaved?: number
 }
 
 /**
@@ -47,7 +52,7 @@ export interface NormalizerStats {
   passThrough: number
   /** Failed calls that reached the host without a normalization attempt. */
   passThroughFailed: number
-  /** Projected input tokens avoided: healedSuccess × configured retry cost. */
+  /** Sum of measured input tokens avoided across successful healing events. */
   estimatedTokensSaved: number
   healingSuccessRate: number // 0 - 100
   /** Per-tool intercepted-call totals; the UI ranks and renders these directly. */
@@ -85,7 +90,6 @@ export class ToolNormalizerTracker {
   private records: NormalizerRecord[] = []
   /** Dashboard transport window; the JSONL log holds the unbounded history. */
   private maxRecords = 1000
-  private retryTokenCost = 0
   private persistPassthrough = false
 
   public static getInstance(): ToolNormalizerTracker {
@@ -116,9 +120,10 @@ export class ToolNormalizerTracker {
     // Category breakdown
     this.byCategory[record.category] = (this.byCategory[record.category] ?? 0) + 1
 
-    // Token-savings projection accrues with the healed event itself
-    if (record.status === 'success' && record.wasHealed && this.retryTokenCost > 0) {
-      this.estimatedTokensSaved += Math.round(this.retryTokenCost)
+    // Token-savings accrues with the healed, successful event itself; the
+    // per-record figure is measured at dispatch time by the token-meter.
+    if (record.status === 'success' && record.wasHealed) {
+      this.estimatedTokensSaved += record.tokensSaved ?? 0
     }
 
     // Ring buffer for recent records
@@ -138,14 +143,6 @@ export class ToolNormalizerTracker {
   public setPersistPassthrough(enabled: boolean): void {
     this.persistPassthrough = enabled
     if (!enabled) this.records = this.records.filter(isDiagnosticRecord)
-  }
-
-  /**
-   * Set the per-healed-call token-cost estimate used by the projection.
-   * Non-finite or non-positive values disable the projection.
-   */
-  public setRetryTokenCost(cost: number): void {
-    this.retryTokenCost = Number.isFinite(cost) && cost > 0 ? Math.round(cost) : 0
   }
 
   /**
