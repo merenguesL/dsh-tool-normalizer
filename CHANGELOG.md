@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-08-28
+
+### Removed
+
+- **Stale client runtime inject**: the `dsh.client.inject` list no longer names `@deepseek-ai/dsh-client-runtime`, which the host removed in favor of `@deepseek-ai/dsh-client-store` and the session-controller client. The client half never required it at runtime, so the entry was dead metadata against the post-runtime host.
+
 ## [0.3.4] - 2026-08-27
 
 ### Changed
