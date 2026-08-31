@@ -3,6 +3,12 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **run_code 程序语法自愈 (RUN_CODE_SYNTAX)**: programs that fail to parse are repaired before execution with three mechanical fixes, each re-verified against `new AsyncFunction` parsing before acceptance and never applied to valid code — truncated tails (the emitted `code` ends inside an unterminated string or an unclosed call), Python-style triple-quoted strings (`'''`/`"""` spans containing a newline) rewritten as template literals with escaped contents, and unescaped stray backticks inside template literals (escape candidates tried tail-first, already-escaped `` ` `` pairs never double-escaped). This closes the gap where argument-level heals (description completion, inner-description injection) reported a heal while the program body still failed with a parse error. New dashboard category label `RUN_CODE_SYNTAX`.
+
 ## [0.3.5] - 2026-08-28
 
 ### Removed

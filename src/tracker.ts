@@ -13,53 +13,54 @@
  * A single recorded tool normalization event.
  */
 export type NormalizerCategory =
-  | 'INVALID_ARGS'
-  | 'UNKNOWN_TOOL'
-  | 'RANGE_CLAMP'
-  | 'CODE_WRAP'
-  | 'RUN_CODE_DESC'
-  | 'INNER_DESC'
-  | 'FS_OBSERVED'
-  | 'PASSTHROUGH'
+  | "INVALID_ARGS"
+  | "UNKNOWN_TOOL"
+  | "RANGE_CLAMP"
+  | "CODE_WRAP"
+  | "RUN_CODE_DESC"
+  | "RUN_CODE_SYNTAX"
+  | "INNER_DESC"
+  | "FS_OBSERVED"
+  | "PASSTHROUGH";
 
 export interface NormalizerRecord {
-  id: string
-  time: number
-  toolName: string
-  category: NormalizerCategory
-  wasHealed: boolean
-  originalArgsPreview: string
-  normalizedArgsPreview?: string
+  id: string;
+  time: number;
+  toolName: string;
+  category: NormalizerCategory;
+  wasHealed: boolean;
+  originalArgsPreview: string;
+  normalizedArgsPreview?: string;
   /** Short bounded description of the fields or dispatch path that changed. */
-  normalizationSummary?: string
-  status: 'success' | 'failed' | 'passthrough'
-  errorMessage?: string
+  normalizationSummary?: string;
+  status: "success" | "failed" | "passthrough";
+  errorMessage?: string;
   /**
    * Measured input tokens this healed call avoided, already multiplied by the
    * skipped model round-trips. Absent for unhealed or unmetered events.
    */
-  tokensSaved?: number
+  tokensSaved?: number;
 }
 
 /**
  * Aggregated statistics across all recorded tool executions.
  */
 export interface NormalizerStats {
-  totalIntercepted: number
-  healedSuccess: number
-  healedFailed: number
+  totalIntercepted: number;
+  healedSuccess: number;
+  healedFailed: number;
   /** Successful calls that were not modified by the normalizer. */
-  passThrough: number
+  passThrough: number;
   /** Failed calls that reached the host without a normalization attempt. */
-  passThroughFailed: number
+  passThroughFailed: number;
   /** Sum of measured input tokens avoided across successful healing events. */
-  estimatedTokensSaved: number
-  healingSuccessRate: number // 0 - 100
+  estimatedTokensSaved: number;
+  healingSuccessRate: number; // 0 - 100
   /** Per-tool intercepted-call totals; the UI ranks and renders these directly. */
-  byTool: Record<string, number>
+  byTool: Record<string, number>;
   /** Per-category event totals; the UI ranks and renders these directly. */
-  byCategory: Record<string, number>
-  recentRecords: NormalizerRecord[]
+  byCategory: Record<string, number>;
+  recentRecords: NormalizerRecord[];
 }
 
 /**
@@ -70,67 +71,74 @@ export interface NormalizerStats {
  * @returns True when the event should be retained in the detailed trace.
  */
 export function isDiagnosticRecord(record: NormalizerRecord): boolean {
-  return record.status !== 'passthrough' || record.wasHealed
+  return record.status !== "passthrough" || record.wasHealed;
 }
 
 /**
  * Singleton / stateful tracker for tool normalizer events.
  */
 export class ToolNormalizerTracker {
-  private static instance: ToolNormalizerTracker | undefined
+  private static instance: ToolNormalizerTracker | undefined;
 
-  private totalIntercepted = 0
-  private healedSuccess = 0
-  private healedFailed = 0
-  private passThrough = 0
-  private passThroughFailed = 0
-  private estimatedTokensSaved = 0
-  private byTool: Record<string, number> = Object.create(null) as Record<string, number>
-  private byCategory: Record<string, number> = Object.create(null) as Record<string, number>
-  private records: NormalizerRecord[] = []
+  private totalIntercepted = 0;
+  private healedSuccess = 0;
+  private healedFailed = 0;
+  private passThrough = 0;
+  private passThroughFailed = 0;
+  private estimatedTokensSaved = 0;
+  private byTool: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  private byCategory: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  private records: NormalizerRecord[] = [];
   /** Dashboard transport window; the JSONL log holds the unbounded history. */
-  private maxRecords = 1000
-  private persistPassthrough = false
+  private maxRecords = 1000;
+  private persistPassthrough = false;
 
   public static getInstance(): ToolNormalizerTracker {
     if (!ToolNormalizerTracker.instance) {
-      ToolNormalizerTracker.instance = new ToolNormalizerTracker()
+      ToolNormalizerTracker.instance = new ToolNormalizerTracker();
     }
-    return ToolNormalizerTracker.instance
+    return ToolNormalizerTracker.instance;
   }
 
   /**
    * Record one tool normalizer event.
    */
   public record(record: NormalizerRecord): void {
-    this.totalIntercepted++
-    if (record.status === 'success' && record.wasHealed) {
-      this.healedSuccess++
-    } else if (record.status === 'failed' && record.wasHealed) {
-      this.healedFailed++
-    } else if (record.status === 'failed') {
-      this.passThroughFailed++
+    this.totalIntercepted++;
+    if (record.status === "success" && record.wasHealed) {
+      this.healedSuccess++;
+    } else if (record.status === "failed" && record.wasHealed) {
+      this.healedFailed++;
+    } else if (record.status === "failed") {
+      this.passThroughFailed++;
     } else {
-      this.passThrough++
+      this.passThrough++;
     }
 
     // Tool breakdown
-    this.byTool[record.toolName] = (this.byTool[record.toolName] ?? 0) + 1
+    this.byTool[record.toolName] = (this.byTool[record.toolName] ?? 0) + 1;
 
     // Category breakdown
-    this.byCategory[record.category] = (this.byCategory[record.category] ?? 0) + 1
+    this.byCategory[record.category] =
+      (this.byCategory[record.category] ?? 0) + 1;
 
     // Token-savings accrues with the healed, successful event itself; the
     // per-record figure is measured at dispatch time by the token-meter.
-    if (record.status === 'success' && record.wasHealed) {
-      this.estimatedTokensSaved += record.tokensSaved ?? 0
+    if (record.status === "success" && record.wasHealed) {
+      this.estimatedTokensSaved += record.tokensSaved ?? 0;
     }
 
     // Ring buffer for recent records
     if (this.persistPassthrough || isDiagnosticRecord(record)) {
-      this.records.unshift(record)
+      this.records.unshift(record);
       if (this.records.length > this.maxRecords) {
-        this.records.pop()
+        this.records.pop();
       }
     }
   }
@@ -141,8 +149,8 @@ export class ToolNormalizerTracker {
    * @param enabled - Include successful pass-through calls when true.
    */
   public setPersistPassthrough(enabled: boolean): void {
-    this.persistPassthrough = enabled
-    if (!enabled) this.records = this.records.filter(isDiagnosticRecord)
+    this.persistPassthrough = enabled;
+    if (!enabled) this.records = this.records.filter(isDiagnosticRecord);
   }
 
   /**
@@ -151,28 +159,35 @@ export class ToolNormalizerTracker {
    * of the supplied events.
    */
   public restore(stats: NormalizerStats): void {
-    this.totalIntercepted = stats.totalIntercepted
-    this.healedSuccess = stats.healedSuccess
-    this.healedFailed = stats.healedFailed
-    this.passThrough = stats.passThrough
-    this.passThroughFailed = stats.passThroughFailed
-    this.estimatedTokensSaved = stats.estimatedTokensSaved
-    this.byTool = Object.assign(Object.create(null), stats.byTool) as Record<string, number>
-    this.byCategory = Object.assign(Object.create(null), stats.byCategory) as Record<string, number>
+    this.totalIntercepted = stats.totalIntercepted;
+    this.healedSuccess = stats.healedSuccess;
+    this.healedFailed = stats.healedFailed;
+    this.passThrough = stats.passThrough;
+    this.passThroughFailed = stats.passThroughFailed;
+    this.estimatedTokensSaved = stats.estimatedTokensSaved;
+    this.byTool = Object.assign(Object.create(null), stats.byTool) as Record<
+      string,
+      number
+    >;
+    this.byCategory = Object.assign(
+      Object.create(null),
+      stats.byCategory,
+    ) as Record<string, number>;
     this.records = [...stats.recentRecords]
-      .filter(record => this.persistPassthrough || isDiagnosticRecord(record))
+      .filter((record) => this.persistPassthrough || isDiagnosticRecord(record))
       .sort((a, b) => b.time - a.time)
-      .slice(0, this.maxRecords)
+      .slice(0, this.maxRecords);
   }
 
   /**
    * Retrieve the current aggregate statistics snapshot.
    */
   public getSnapshot(): NormalizerStats {
-    const totalHealAttempts = this.healedSuccess + this.healedFailed
-    const healingSuccessRate = totalHealAttempts > 0
-      ? Math.round((this.healedSuccess / totalHealAttempts) * 1000) / 10
-      : 0
+    const totalHealAttempts = this.healedSuccess + this.healedFailed;
+    const healingSuccessRate =
+      totalHealAttempts > 0
+        ? Math.round((this.healedSuccess / totalHealAttempts) * 1000) / 10
+        : 0;
 
     return {
       totalIntercepted: this.totalIntercepted,
@@ -185,21 +200,21 @@ export class ToolNormalizerTracker {
       byTool: { ...this.byTool },
       byCategory: { ...this.byCategory },
       recentRecords: [...this.records],
-    }
+    };
   }
 
   /**
    * Reset tracking metrics.
    */
   public reset(): void {
-    this.totalIntercepted = 0
-    this.healedSuccess = 0
-    this.healedFailed = 0
-    this.passThrough = 0
-    this.passThroughFailed = 0
-    this.estimatedTokensSaved = 0
-    this.byTool = Object.create(null) as Record<string, number>
-    this.byCategory = Object.create(null) as Record<string, number>
-    this.records = []
+    this.totalIntercepted = 0;
+    this.healedSuccess = 0;
+    this.healedFailed = 0;
+    this.passThrough = 0;
+    this.passThroughFailed = 0;
+    this.estimatedTokensSaved = 0;
+    this.byTool = Object.create(null) as Record<string, number>;
+    this.byCategory = Object.create(null) as Record<string, number>;
+    this.records = [];
   }
 }

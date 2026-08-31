@@ -9,169 +9,223 @@
  * @module dsh-tool-normalizer/stats-log
  */
 
-import { appendFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { isDiagnosticRecord, ToolNormalizerTracker, type NormalizerRecord, type NormalizerStats } from './tracker.ts'
+import {
+  appendFile,
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import {
+  isDiagnosticRecord,
+  ToolNormalizerTracker,
+  type NormalizerRecord,
+  type NormalizerStats,
+} from "./tracker.ts";
 
-const SUMMARY_VERSION = 1
-const SUMMARY_FLUSH_DELAY_MS = 1000
+const SUMMARY_VERSION = 1;
+const SUMMARY_FLUSH_DELAY_MS = 1000;
 
 /** Event log lives under the DSH home directory (default ~/.dsh). */
 export function statsLogPath(): string {
-  const home = process.env['DSH_HOME'] ?? join(homedir(), '.dsh')
-  return join(home, 'tool-normalizer-events.jsonl')
+  const home = process.env["DSH_HOME"] ?? join(homedir(), ".dsh");
+  return join(home, "tool-normalizer-events.jsonl");
 }
 
 /** Compact aggregate file paired with {@link statsLogPath}. */
 export function statsSummaryPath(): string {
-  return join(dirname(statsLogPath()), 'tool-normalizer-summary.json')
+  return join(dirname(statsLogPath()), "tool-normalizer-summary.json");
 }
 
 /** Persisted counters; detailed recent records remain in the JSONL file. */
 interface PersistedAggregate {
-  version: number
-  updatedAt: number
-  totalIntercepted: number
-  healedSuccess: number
-  healedFailed: number
-  passThrough: number
-  passThroughFailed: number
-  estimatedTokensSaved: number
-  byTool: Record<string, number>
-  byCategory: Record<string, number>
+  version: number;
+  updatedAt: number;
+  totalIntercepted: number;
+  healedSuccess: number;
+  healedFailed: number;
+  passThrough: number;
+  passThroughFailed: number;
+  estimatedTokensSaved: number;
+  byTool: Record<string, number>;
+  byCategory: Record<string, number>;
 }
 
-const CATEGORIES = new Set<NormalizerRecord['category']>([
-  'INVALID_ARGS',
-  'UNKNOWN_TOOL',
-  'RANGE_CLAMP',
-  'CODE_WRAP',
-  'RUN_CODE_DESC',
-  'INNER_DESC',
-  'FS_OBSERVED',
-  'PASSTHROUGH',
-])
+const CATEGORIES = new Set<NormalizerRecord["category"]>([
+  "INVALID_ARGS",
+  "UNKNOWN_TOOL",
+  "RANGE_CLAMP",
+  "CODE_WRAP",
+  "RUN_CODE_DESC",
+  "INNER_DESC",
+  "FS_OBSERVED",
+  "PASSTHROUGH",
+]);
 
-const STATUSES = new Set<NormalizerRecord['status']>(['success', 'failed', 'passthrough'])
+const STATUSES = new Set<NormalizerRecord["status"]>([
+  "success",
+  "failed",
+  "passthrough",
+]);
 
 /** Serialized file operations prevent reset, append, and summary writes from overtaking each other. */
-let writeQueue: Promise<void> = Promise.resolve()
-let pendingSummary: PersistedAggregate | undefined
-let summaryTimer: ReturnType<typeof setTimeout> | undefined
-let writeGeneration = 0
+let writeQueue: Promise<void> = Promise.resolve();
+let pendingSummary: PersistedAggregate | undefined;
+let summaryTimer: ReturnType<typeof setTimeout> | undefined;
+let writeGeneration = 0;
 
 /**
  * True inside the plugin's own unit-test runs. Tests must not read or mutate
  * the developer's durable normalizer history.
  */
 function isTestRun(): boolean {
-  return process.env['VITEST'] !== undefined || process.env['NODE_ENV'] === 'test'
+  return (
+    process.env["VITEST"] !== undefined || process.env["NODE_ENV"] === "test"
+  );
 }
 
 function isRecordObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function finiteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value)
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 function nonNegativeCount(value: unknown): value is number {
-  return finiteNumber(value) && Number.isSafeInteger(value) && value >= 0
+  return finiteNumber(value) && Number.isSafeInteger(value) && value >= 0;
 }
 
 function validRecord(value: unknown): value is NormalizerRecord {
-  if (!isRecordObject(value)) return false
-  if (typeof value.id !== 'string' || value.id.length === 0) return false
-  if (!finiteNumber(value.time)) return false
-  if (typeof value.toolName !== 'string' || value.toolName.length === 0) return false
-  if (!CATEGORIES.has(value.category as NormalizerRecord['category'])) return false
-  if (typeof value.wasHealed !== 'boolean') return false
-  if (typeof value.originalArgsPreview !== 'string') return false
-  if (!STATUSES.has(value.status as NormalizerRecord['status'])) return false
-  if (value.normalizedArgsPreview !== undefined && typeof value.normalizedArgsPreview !== 'string') return false
-  if (value.normalizationSummary !== undefined && typeof value.normalizationSummary !== 'string') return false
-  if (value.errorMessage !== undefined && typeof value.errorMessage !== 'string') return false
-  if (value.tokensSaved !== undefined && !nonNegativeCount(value.tokensSaved)) return false
-  return true
+  if (!isRecordObject(value)) return false;
+  if (typeof value.id !== "string" || value.id.length === 0) return false;
+  if (!finiteNumber(value.time)) return false;
+  if (typeof value.toolName !== "string" || value.toolName.length === 0)
+    return false;
+  if (!CATEGORIES.has(value.category as NormalizerRecord["category"]))
+    return false;
+  if (typeof value.wasHealed !== "boolean") return false;
+  if (typeof value.originalArgsPreview !== "string") return false;
+  if (!STATUSES.has(value.status as NormalizerRecord["status"])) return false;
+  if (
+    value.normalizedArgsPreview !== undefined &&
+    typeof value.normalizedArgsPreview !== "string"
+  )
+    return false;
+  if (
+    value.normalizationSummary !== undefined &&
+    typeof value.normalizationSummary !== "string"
+  )
+    return false;
+  if (
+    value.errorMessage !== undefined &&
+    typeof value.errorMessage !== "string"
+  )
+    return false;
+  if (value.tokensSaved !== undefined && !nonNegativeCount(value.tokensSaved))
+    return false;
+  return true;
 }
 
 function safeCountMap(value: unknown): Record<string, number> {
-  if (!isRecordObject(value)) return {}
-  const result: Record<string, number> = Object.create(null) as Record<string, number>
+  if (!isRecordObject(value)) return {};
+  const result: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
   for (const [key, count] of Object.entries(value)) {
-    if (nonNegativeCount(count)) result[key] = count
+    if (nonNegativeCount(count)) result[key] = count;
   }
-  return result
+  return result;
 }
 
 function validAggregate(value: unknown): value is PersistedAggregate {
-  if (!isRecordObject(value) || value.version !== SUMMARY_VERSION) return false
-  return finiteNumber(value.updatedAt)
-    && nonNegativeCount(value.totalIntercepted)
-    && nonNegativeCount(value.healedSuccess)
-    && nonNegativeCount(value.healedFailed)
-    && nonNegativeCount(value.passThrough)
-    && nonNegativeCount(value.passThroughFailed)
-    && nonNegativeCount(value.estimatedTokensSaved)
-    && isRecordObject(value.byTool)
-    && isRecordObject(value.byCategory)
+  if (!isRecordObject(value) || value.version !== SUMMARY_VERSION) return false;
+  return (
+    finiteNumber(value.updatedAt) &&
+    nonNegativeCount(value.totalIntercepted) &&
+    nonNegativeCount(value.healedSuccess) &&
+    nonNegativeCount(value.healedFailed) &&
+    nonNegativeCount(value.passThrough) &&
+    nonNegativeCount(value.passThroughFailed) &&
+    nonNegativeCount(value.estimatedTokensSaved) &&
+    isRecordObject(value.byTool) &&
+    isRecordObject(value.byCategory)
+  );
 }
 
 function accumulateRecord(
-  totals: Pick<PersistedAggregate, 'totalIntercepted' | 'healedSuccess' | 'healedFailed' | 'passThrough' | 'passThroughFailed'>,
+  totals: Pick<
+    PersistedAggregate,
+    | "totalIntercepted"
+    | "healedSuccess"
+    | "healedFailed"
+    | "passThrough"
+    | "passThroughFailed"
+  >,
   byTool: Record<string, number>,
   byCategory: Record<string, number>,
   record: NormalizerRecord,
 ): void {
-  totals.totalIntercepted++
-  if (record.status === 'success' && record.wasHealed) totals.healedSuccess++
-  else if (record.status === 'failed' && record.wasHealed) totals.healedFailed++
-  else if (record.status === 'failed') totals.passThroughFailed++
-  else totals.passThrough++
+  totals.totalIntercepted++;
+  if (record.status === "success" && record.wasHealed) totals.healedSuccess++;
+  else if (record.status === "failed" && record.wasHealed)
+    totals.healedFailed++;
+  else if (record.status === "failed") totals.passThroughFailed++;
+  else totals.passThrough++;
 
-  byTool[record.toolName] = (byTool[record.toolName] ?? 0) + 1
-  byCategory[record.category] = (byCategory[record.category] ?? 0) + 1
+  byTool[record.toolName] = (byTool[record.toolName] ?? 0) + 1;
+  byCategory[record.category] = (byCategory[record.category] ?? 0) + 1;
 }
 
 function parseEventLog(raw: string): NormalizerRecord[] {
-  const records: NormalizerRecord[] = []
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue
+  const records: NormalizerRecord[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
     try {
-      const parsed: unknown = JSON.parse(line)
-      if (validRecord(parsed)) records.push(parsed)
+      const parsed: unknown = JSON.parse(line);
+      if (validRecord(parsed)) records.push(parsed);
     } catch {
       // A torn JSONL tail is ignored; complete neighboring events remain usable.
     }
   }
-  return records
+  return records;
 }
 
 async function readOptional(path: string): Promise<string | undefined> {
   try {
-    return await readFile(path, 'utf-8')
+    return await readFile(path, "utf-8");
   } catch {
     // Missing or temporarily unreadable history degrades to an empty snapshot.
-    return undefined
+    return undefined;
   }
 }
 
-function aggregateFromRecords(records: readonly NormalizerRecord[]): PersistedAggregate {
+function aggregateFromRecords(
+  records: readonly NormalizerRecord[],
+): PersistedAggregate {
   const totals = {
     totalIntercepted: 0,
     healedSuccess: 0,
     healedFailed: 0,
     passThrough: 0,
     passThroughFailed: 0,
-  }
-  const byTool: Record<string, number> = Object.create(null) as Record<string, number>
-  const byCategory: Record<string, number> = Object.create(null) as Record<string, number>
-  let estimatedTokensSaved = 0
+  };
+  const byTool: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  const byCategory: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  let estimatedTokensSaved = 0;
   for (const record of records) {
-    accumulateRecord(totals, byTool, byCategory, record)
-    estimatedTokensSaved += record.tokensSaved ?? 0
+    accumulateRecord(totals, byTool, byCategory, record);
+    estimatedTokensSaved += record.tokensSaved ?? 0;
   }
   return {
     version: SUMMARY_VERSION,
@@ -180,7 +234,7 @@ function aggregateFromRecords(records: readonly NormalizerRecord[]): PersistedAg
     estimatedTokensSaved,
     byTool,
     byCategory,
-  }
+  };
 }
 
 function snapshotAggregate(stats: NormalizerStats): PersistedAggregate {
@@ -195,12 +249,16 @@ function snapshotAggregate(stats: NormalizerStats): PersistedAggregate {
     estimatedTokensSaved: stats.estimatedTokensSaved,
     byTool: { ...stats.byTool },
     byCategory: { ...stats.byCategory },
-  }
+  };
 }
 
-function healingRate(stats: Pick<NormalizerStats, 'healedSuccess' | 'healedFailed'>): number {
-  const attempts = stats.healedSuccess + stats.healedFailed
-  return attempts > 0 ? Math.round((stats.healedSuccess / attempts) * 1000) / 10 : 0
+function healingRate(
+  stats: Pick<NormalizerStats, "healedSuccess" | "healedFailed">,
+): number {
+  const attempts = stats.healedSuccess + stats.healedFailed;
+  return attempts > 0
+    ? Math.round((stats.healedSuccess / attempts) * 1000) / 10
+    : 0;
 }
 
 /**
@@ -209,29 +267,31 @@ function healingRate(stats: Pick<NormalizerStats, 'healedSuccess' | 'healedFaile
  * untouched records are retained for counters but filtered from the detail
  * window after the new default takes effect.
  */
-export async function restoreFromLog(tracker: ToolNormalizerTracker): Promise<void> {
-  if (isTestRun()) return
+export async function restoreFromLog(
+  tracker: ToolNormalizerTracker,
+): Promise<void> {
+  if (isTestRun()) return;
 
   const [rawEvents, rawSummary] = await Promise.all([
     readOptional(statsLogPath()),
     readOptional(statsSummaryPath()),
-  ])
-  const records = rawEvents === undefined ? [] : parseEventLog(rawEvents)
+  ]);
+  const records = rawEvents === undefined ? [] : parseEventLog(rawEvents);
 
-  let aggregate: PersistedAggregate | undefined
+  let aggregate: PersistedAggregate | undefined;
   if (rawSummary !== undefined) {
     try {
-      const parsed: unknown = JSON.parse(rawSummary)
-      if (validAggregate(parsed)) aggregate = parsed
+      const parsed: unknown = JSON.parse(rawSummary);
+      if (validAggregate(parsed)) aggregate = parsed;
     } catch {
       // A torn summary is replaced by the event-log fallback below.
     }
   }
-  aggregate ??= aggregateFromRecords(records)
+  aggregate ??= aggregateFromRecords(records);
 
   const recentRecords = records
     .filter(isDiagnosticRecord)
-    .sort((a, b) => b.time - a.time)
+    .sort((a, b) => b.time - a.time);
   const stats: NormalizerStats = {
     totalIntercepted: aggregate.totalIntercepted,
     healedSuccess: aggregate.healedSuccess,
@@ -243,49 +303,47 @@ export async function restoreFromLog(tracker: ToolNormalizerTracker): Promise<vo
     byTool: safeCountMap(aggregate.byTool),
     byCategory: safeCountMap(aggregate.byCategory),
     recentRecords,
-  }
-  tracker.restore(stats)
+  };
+  tracker.restore(stats);
 }
 
 function enqueue(task: () => Promise<void>): void {
-  writeQueue = writeQueue
-    .then(task)
-    .catch(() => {
-      // Persistence is diagnostic only; an unwritable DSH home must not break a tool call.
-    })
+  writeQueue = writeQueue.then(task).catch(() => {
+    // Persistence is diagnostic only; an unwritable DSH home must not break a tool call.
+  });
 }
 
 async function writeSummary(summary: PersistedAggregate): Promise<void> {
-  await mkdir(dirname(statsSummaryPath()), { recursive: true })
-  const path = statsSummaryPath()
-  const temporaryPath = `${path}.tmp`
-  await writeFile(temporaryPath, JSON.stringify(summary), 'utf-8')
-  await rename(temporaryPath, path)
+  await mkdir(dirname(statsSummaryPath()), { recursive: true });
+  const path = statsSummaryPath();
+  const temporaryPath = `${path}.tmp`;
+  await writeFile(temporaryPath, JSON.stringify(summary), "utf-8");
+  await rename(temporaryPath, path);
 }
 
 function flushPendingSummary(): void {
   if (summaryTimer !== undefined) {
-    clearTimeout(summaryTimer)
-    summaryTimer = undefined
+    clearTimeout(summaryTimer);
+    summaryTimer = undefined;
   }
-  const summary = pendingSummary
-  pendingSummary = undefined
-  if (summary !== undefined) enqueue(() => writeSummary(summary))
+  const summary = pendingSummary;
+  pendingSummary = undefined;
+  if (summary !== undefined) enqueue(() => writeSummary(summary));
 }
 
 function scheduleSummary(stats: NormalizerStats, immediate: boolean): void {
-  pendingSummary = snapshotAggregate(stats)
+  pendingSummary = snapshotAggregate(stats);
   if (immediate) {
-    flushPendingSummary()
-    return
+    flushPendingSummary();
+    return;
   }
-  if (summaryTimer !== undefined) return
-  const generation = writeGeneration
+  if (summaryTimer !== undefined) return;
+  const generation = writeGeneration;
   summaryTimer = setTimeout(() => {
-    summaryTimer = undefined
-    if (generation === writeGeneration) flushPendingSummary()
-  }, SUMMARY_FLUSH_DELAY_MS)
-  summaryTimer.unref?.()
+    summaryTimer = undefined;
+    if (generation === writeGeneration) flushPendingSummary();
+  }, SUMMARY_FLUSH_DELAY_MS);
+  summaryTimer.unref?.();
 }
 
 /**
@@ -300,48 +358,52 @@ export function appendEvent(
   stats: NormalizerStats,
   options: { persistPassthrough?: boolean } = {},
 ): void {
-  if (isTestRun()) return
-  const detailed = options.persistPassthrough === true || isDiagnosticRecord(record)
+  if (isTestRun()) return;
+  const detailed =
+    options.persistPassthrough === true || isDiagnosticRecord(record);
   if (detailed) {
-    const line = JSON.stringify(record) + '\n'
+    const line = `${JSON.stringify(record)}\n`;
     enqueue(async () => {
-      await mkdir(dirname(statsLogPath()), { recursive: true })
-      await appendFile(statsLogPath(), line, 'utf-8')
-    })
+      await mkdir(dirname(statsLogPath()), { recursive: true });
+      await appendFile(statsLogPath(), line, "utf-8");
+    });
   }
   // Failures/healing events are flushed promptly; normal pass-through counts
   // are coalesced for one second to avoid a write per successful call.
-  scheduleSummary(stats, detailed)
+  scheduleSummary(stats, detailed);
 }
 
 /** Persist the current compact snapshot, normally after asynchronous replay. */
 export function persistSnapshot(stats: NormalizerStats): void {
-  if (!isTestRun()) scheduleSummary(stats, true)
+  if (!isTestRun()) scheduleSummary(stats, true);
 }
 
 /** Wait for queued diagnostic writes; useful during orderly plugin teardown. */
 export function flushStatsLog(): Promise<void> {
-  if (!isTestRun()) flushPendingSummary()
-  return writeQueue
+  if (!isTestRun()) flushPendingSummary();
+  return writeQueue;
 }
 
 /** Clear detailed history and its aggregate snapshot in the same write queue. */
 export function clearLog(): Promise<void> {
-  if (isTestRun()) return Promise.resolve()
-  writeGeneration++
+  if (isTestRun()) return Promise.resolve();
+  writeGeneration++;
   if (summaryTimer !== undefined) {
-    clearTimeout(summaryTimer)
-    summaryTimer = undefined
+    clearTimeout(summaryTimer);
+    summaryTimer = undefined;
   }
-  pendingSummary = undefined
+  pendingSummary = undefined;
   enqueue(async () => {
-    await mkdir(dirname(statsLogPath()), { recursive: true })
-    await writeFile(statsLogPath(), '', 'utf-8')
+    await mkdir(dirname(statsLogPath()), { recursive: true });
+    await writeFile(statsLogPath(), "", "utf-8");
     try {
-      await unlink(statsSummaryPath())
+      await unlink(statsSummaryPath());
     } catch (error: unknown) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+      if (
+        !(error instanceof Error && "code" in error && error.code === "ENOENT")
+      )
+        throw error;
     }
-  })
-  return writeQueue
+  });
+  return writeQueue;
 }

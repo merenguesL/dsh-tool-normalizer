@@ -58,7 +58,8 @@ Detailed root-cause analysis identified four primary structural error drivers:
 - 🛠️ **`run_code` Schema Auto-Healing**:
   - Automatically wraps `{"command": "git status"}` or `{"cmd": "..."}` into valid `run_code` JavaScript dispatches.
   - Fills in missing `description` fields with sensible contextual defaults.
-  - Strips accidental Markdown code block fences (e.g. ````typescript ... ````).
+  - Strips accidental Markdown code block fences (e.g. ````typescript ...````).
+  - **Program syntax self-healing**: when the emitted `code` does not parse, repairs the three mechanical breakage classes the host's async-function executor rejects — truncated tails (code ending inside an unclosed string or call), Python-style triple-quoted strings (`'''`/`"""` spans containing a newline) rewritten as escaped template literals, and stray unescaped backticks inside template literals. Every repair is re-verified with the same `new AsyncFunction` parse the host uses; valid programs are never touched.
 - 🌉 **Code-Mode Direct Tool Bridging**:
   - When an `UNKNOWN_TOOL` result reaches `tools/execute` and the target is visible in the active agent scope, the plugin re-dispatches it through the host's `tools.execute()` API as a nested call, preserving agent/session ownership, cancellation, contexts, and terminal state.
   - Scope note: under the PTC (`code`) presentation collapse, the host may reject a direct call before any listener runs; a plugin cannot intercept that path. The plugin never invokes a tool definition's `execute()` method directly.
@@ -86,7 +87,8 @@ Detailed root-cause analysis identified four primary structural error drivers:
 
 **Placement**: DeepSeek Harness Settings panel (`settings.section` with ID `tool-normalizer`, order `25`).
 
-### Rationale:
+### Rationale
+
 1. **Consistency with DSH Architecture**: In DSH Web UI, developer diagnostics and usage metrics (like `dsh-usage-atlas`, Model configuration, and Plugin inventory) are hosted as first-class sections inside the Settings panel.
 2. **Zero Conversation Clutter**: Placing diagnostics in Settings keeps the primary agent chat canvas distraction-free while remaining just one click away via the gear icon in the sidebar rail.
 3. **Unified Management**: Allows administrators and developers to observe runtime error rates and clear logs in the same panel where they configure models and plugins.
@@ -115,7 +117,9 @@ dsh plugin --profile tui add dsh-tool-normalizer
 ```
 
 #### Local Development Link (Optional)
+
 If you are developing or testing local changes:
+
 ```sh
 pnpm dsh plugin --profile web add ./plugins/dsh-tool-normalizer
 ```
@@ -173,6 +177,7 @@ The token-savings KPI sums measured per-heal input tokens: each successful heal 
    - Go to **GitHub Repository Settings ➔ Secrets and variables ➔ Actions ➔ New repository secret**.
    - Name: `NPM_TOKEN`, Value: `<your-npm-automation-token>` (Ensure 2FA bypass is enabled for write actions).
 2. Bump the version and push a release tag:
+
    ```sh
    # Bump version (patch / minor / major)
    npm version patch
@@ -180,6 +185,7 @@ The token-savings KPI sums measured per-heal input tokens: each successful heal 
    # Push commit and tags to GitHub
    git push origin main --tags
    ```
+
 3. Create a GitHub Release on the new tag. The GitHub Actions workflow (`.github/workflows/publish.yml`) will automatically run tests, build artifacts, and publish to npm!
 
 ### Option 2: Manual npm Publishing
