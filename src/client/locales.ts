@@ -92,10 +92,13 @@ export const zh = {
   "按当前会话工作目录修正相对路径，修正倒置范围，并在错误提供真实行数时安全重试越界 view_range。",
  rule4Title: "文件观察后重试 (Observe-then-Retry)",
  rule4Desc:
-  "仅在编辑或写入收到 FS_NOT_OBSERVED 后读取目标，再通过宿主标准派发重试一次，避免无条件增加读取调用。",
+  "在编辑或写入收到 FS_NOT_OBSERVED 或 FS_STALE_VERSION 后读取目标，再通过宿主标准派发重试一次；锚点丢失类错误仅预读刷新观察态而不盲目重试，避免无条件增加读取调用。",
  rule5Title: "动态极简提示词增强 (Prompt Invariant Injection)",
  rule5Desc:
-  "向系统提示词注入极小体积的最佳实践规范（先读后改、绝对路径使用），从源头减少模型试错。",
+  "向系统提示词注入极小体积的最佳实践规范（先读后改、绝对路径使用、JS-only 与反引号转义），从源头减少模型试错。",
+ rule6Title: "失败即时提示 (Error Hints)",
+ rule6Desc:
+  "对无法恢复的错误，向结果追加一条可操作的恢复提示（PTC 直调改写示例、语法排障要点），原报错文本完整保留，模型当轮即可纠正。",
 
  statusEnabled: "已启用",
  statusActive: "生效中",

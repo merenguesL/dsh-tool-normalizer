@@ -6,6 +6,7 @@ import {
   appendEvent,
   clearLog,
   flushStatsLog,
+  restoreFromLog,
   statsLogPath,
   statsSummaryPath,
 } from '../src/stats-log.ts'
@@ -61,5 +62,33 @@ describe('stats-log persistence policy', () => {
     await clearLog()
     await flushStatsLog()
     expect((await readFile(statsLogPath(), 'utf8'))).toBe('')
+  })
+
+  it('round-trips RUN_CODE_SYNTAX diagnostic records across restarts', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-tool-normalizer-'))
+    process.env['DSH_HOME'] = home
+    delete process.env['VITEST']
+    delete process.env['NODE_ENV']
+
+    const tracker = new ToolNormalizerTracker()
+    const event = record({
+      id: 'syntax-1',
+      toolName: 'run_code',
+      category: 'RUN_CODE_SYNTAX',
+      wasHealed: true,
+      status: 'failed',
+      errorMessage: 'parse failed',
+    })
+    tracker.record(event)
+    appendEvent(event, tracker.getSnapshot())
+    await flushStatsLog()
+
+    const revived = new ToolNormalizerTracker()
+    await restoreFromLog(revived)
+    expect(revived.getSnapshot()).toMatchObject({ healedFailed: 1 })
+    expect(revived.getSnapshot().byCategory['RUN_CODE_SYNTAX']).toBe(1)
+
+    await clearLog()
+    await flushStatsLog()
   })
 })

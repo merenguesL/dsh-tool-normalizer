@@ -60,6 +60,7 @@ const CATEGORIES = new Set<NormalizerRecord["category"]>([
   "RANGE_CLAMP",
   "CODE_WRAP",
   "RUN_CODE_DESC",
+  "RUN_CODE_SYNTAX",
   "INNER_DESC",
   "FS_OBSERVED",
   "PASSTHROUGH",

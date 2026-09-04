@@ -48,9 +48,11 @@ export function normalizeRunCodeArguments(rawArgs: unknown): { code: string; des
     argsObj = { ...(rawArgs as Record<string, unknown>) }
   }
 
-  // Case 1: Model passed "command" or "cmd" (treating run_code as bash)
+  // Case 1: Model passed "command" or "cmd" (treating run_code as bash).
+  // An empty command synthesizes an empty program that succeeds as a no-op
+  // and hides the model error, so it is left for the host to reject loudly.
   const rawCommand = argsObj['command'] ?? argsObj['cmd']
-  if (typeof rawCommand === 'string' && (!argsObj['code'] || typeof argsObj['code'] !== 'string')) {
+  if (typeof rawCommand === 'string' && rawCommand.trim().length > 0 && (!argsObj['code'] || typeof argsObj['code'] !== 'string')) {
     const cmdStr = rawCommand.trim()
     const description = typeof argsObj['description'] === 'string' && argsObj['description'].trim().length > 0
       ? argsObj['description'].trim()

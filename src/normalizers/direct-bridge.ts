@@ -25,6 +25,14 @@ const BRIDGEABLE_TOOLS = new Set([
   'str_replace_editor',
   'job_output',
   'job_kill',
+  // Observed in production UNKNOWN_TOOL results. Recovery still requires the
+  // target to be visible in the same agent scope; a PTC-collapsed call denied
+  // before the waterfall never reaches this plugin (see scope note in README).
+  'web_fetch',
+  'web_search',
+  'todo_write',
+  'skill',
+  'ask_user_question',
 ])
 
 /**

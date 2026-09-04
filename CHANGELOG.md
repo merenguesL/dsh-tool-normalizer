@@ -3,6 +3,26 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-04
+
+### Added
+
+- **失败即时提示 (`errorHints`, 默认开启)**: PTC 折叠直调与不可修复的 `run_code` 解析失败，在保留原报错文本的前提下追加一条可操作提示（直调改写示例、语法排障要点），模型当轮即可纠正；`errorHints: false` 保持宿主报错逐字节不变。
+- **`FS_STALE_VERSION` 观察后重试**: 与 `FS_NOT_OBSERVED` 同路径处理（重读刷新观察版本后按原参重试一次）；`FS_EDIT_NOT_FOUND` / `FS_AMBIGUOUS_EDIT` 绝不盲目重试，仅预读刷新观察态以便下次重试。
+- **规则页第 6 张卡片**: 看板规则页新增失败提示说明；深色主题下选中的筛选 pill 与页签修复为 tint 底 + 品牌色文字（此前为黑底黑字）；正常放行状态改用中性色。
+
+### Fixed
+
+- **统计分类补齐 `RUN_CODE_SYNTAX`**: `stats-log.ts` 的持久化分类集合此前遗漏该类别，触发后重启即在恢复时被丢弃。
+- **空命令静默成功**: `{"command": []}` 此前被归一化为空程序并记一次成功；现在保留原参数交由宿主大声拒绝，不计入自愈。
+- **自愈嵌套调用重复计数**: 插件自身的嵌套恢复调用（`callId` 含 `:normalizer:`）不再计入拦截总数与日志，分母仅为面向用户的调用；Code-Mode 内层 `tools.*` 调用仍正常计数。
+- **成功率归因**: 前置规范化改对、但终错属于另一失败类别时，记为无关的未修复失败而非修复失败。
+- **桥接名单扩展**: `web_fetch` / `web_search` / `todo_write` / `skill` / `ask_user_question` 纳入可桥接范围（仍要求目标在同作用域可见；PTC 预拒绝路径任何插件均不可见）。
+
+### Changed
+
+- 提示词新增一行：`run_code` 内只写 JS（禁 `def` / `print` / `'''`）与反引号转义要求；静态文本，前缀缓存友好。
+
 ## [Unreleased]
 
 ### Added

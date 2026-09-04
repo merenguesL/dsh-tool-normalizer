@@ -214,6 +214,15 @@ export function NormalizerSection(
     return styles.statusDotPass;
   };
 
+  const statusTone = (record: {
+    status: string;
+    wasHealed: boolean;
+  }): string => {
+    if (record.status === "failed") return styles.statusTextFail;
+    if (record.wasHealed) return "";
+    return styles.statusTextPass;
+  };
+
   const statusText = (record: {
     status: string;
     wasHealed: boolean;
@@ -460,7 +469,7 @@ export function NormalizerSection(
                               className={`${styles.statusDot} ${dotTone(record)}`}
                             />
                             <span
-                              className={`${styles.statusText} ${record.status === "failed" ? styles.statusTextFail : ""}`}
+                              className={`${styles.statusText} ${statusTone(record)}`}
                             >
                               {statusText(record)}
                             </span>
@@ -610,7 +619,7 @@ export function NormalizerSection(
       {/* TAB: rules */}
       {state.activeTab === "rules" && (
         <section className={styles.rulesGrid}>
-          {([1, 2, 3, 4, 5] as const).map((n) => (
+          {([1, 2, 3, 4, 5, 6] as const).map((n) => (
             <article key={n} className={styles.ruleCard}>
               <div className={styles.ruleHead}>
                 <h3 className={styles.ruleTitle}>

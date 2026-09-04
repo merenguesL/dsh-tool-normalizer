@@ -44,6 +44,14 @@ export interface Config {
   injectPrompt?: boolean
 
   /**
+   * Append actionable recovery hints to otherwise-unrecovered error results
+   * (PTC-collapsed direct calls, unrepairable run_code syntax failures).
+   * Hints preserve the original error text and only append guidance.
+   * @default true
+   */
+  errorHints?: boolean
+
+  /**
    * Persist successful calls that required no normalization in the detailed
    * JSONL trace. Normal successful pass-through calls are aggregated in the
    * compact summary file by default and are not written one per call.

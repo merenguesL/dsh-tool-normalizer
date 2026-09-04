@@ -122,6 +122,101 @@ function toolRequiresDescription(
   }
 }
 
+/** A call id minted by this plugin for its own nested recovery dispatches. */
+function isSelfNestedExec(exec: ToolDispatchExecution): boolean {
+  return (
+    typeof exec.callId === "string" && exec.callId.includes(":normalizer:")
+  );
+}
+
+/** Whether the final error plausibly belongs to the attempted heal class. */
+function healMatchesError(
+  category:
+    | "INVALID_ARGS"
+    | "RANGE_CLAMP"
+    | "CODE_WRAP"
+    | "RUN_CODE_DESC"
+    | "RUN_CODE_SYNTAX"
+    | "INNER_DESC",
+  errorCode: string | undefined,
+  errorMessage: string | undefined,
+): boolean {
+  const text = errorMessage ?? "";
+  switch (category) {
+    case "INVALID_ARGS":
+    case "RUN_CODE_DESC":
+    case "CODE_WRAP":
+    case "INNER_DESC":
+      return (
+        errorCode === "INVALID_ARGS" ||
+        /required property|invalid arguments|description/i.test(text)
+      );
+    case "RUN_CODE_SYNTAX":
+      return isSyntaxLikeRunFailure(errorCode, text);
+    case "RANGE_CLAMP":
+      return (
+        /absolute path|view_range|view range|number of lines|out of/i.test(
+          text,
+        ) || errorCode === "FS_NOT_FOUND"
+      );
+  }
+}
+
+/** Whether a run failure looks like a program parse failure, not a semantic one. */
+function isSyntaxLikeRunFailure(
+  errorCode: string | undefined,
+  errorMessage: string,
+): boolean {
+  if (errorCode !== "CODE_RUN_FAILED") return false;
+  return /Unexpected token|Expected ','|Expected ';'|Unterminated|lexing error|<eof>|string literal|Expression expected|Expected ident/i.test(
+    errorMessage,
+  );
+}
+
+/** Hint appended to a PTC-collapsed direct call the plugin cannot dispatch. */
+function collapsedCallHint(toolName: string): string {
+  return (
+    `[tool-normalizer hint] Direct '${toolName}' calls are hidden in Code-Mode; ` +
+    `reissue it inside run_code instead: ` +
+    `run_code({ code: "const r = await tools.${toolName}(<args>); return r;", ` +
+    `description: "<what this call does>" }).`
+  );
+}
+
+/** Hint appended to a run_code body that parses badly and resists repair. */
+const SYNTAX_HINT =
+  "[tool-normalizer hint] The run_code program failed to parse before running. " +
+  "Usual causes: unescaped backticks inside template literals, Python pasted as JS " +
+  "(`def`/`print`/`'''`), or a truncated tail. Keep the program short; write long " +
+  "shell/python bodies to a file and run that file instead.";
+
+/**
+ * Return a copy of the result with the hint appended to its first text block.
+ * The host may freeze results, so the original object is never mutated.
+ * @param result - Final error result from the downstream pipeline.
+ * @param hint - Bounded guidance text to append.
+ * @returns A result preserving every field with extended text content.
+ */
+function appendResultHint(
+  result: ToolExecutionResult,
+  hint: string,
+): ToolExecutionResult {
+  const content = Array.isArray(result.content) ? [...result.content] : [];
+  const index = content.findIndex(
+    (block) => typeof block === "object" && block !== null && block.type === "text",
+  );
+  if (index >= 0) {
+    const block = content[index] as { type: string; text?: string };
+    content[index] = {
+      ...block,
+      text: `${block.text ?? ""}\n${hint}`,
+    };
+  } else {
+    content.push({ type: "text", text: hint });
+  }
+  return { ...result, content };
+}
+
 function errorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const candidate = error as { code?: unknown; info?: { code?: unknown } };
@@ -221,8 +316,7 @@ function isRangeRetry(exec: ToolDispatchExecution): boolean {
 async function observeAndRetryMutation(
   exec: ToolDispatchExecution,
   tools: NonNullable<ReturnType<typeof getToolRuntime>>,
-): Promise<ToolExecutionResult | undefined> {
-  if (!isObservationMutation(exec.name, exec.arguments)) return undefined;
+): Promise<ToolExecutionResult | undefined> {  if (!isObservationMutation(exec.name, exec.arguments)) return undefined;
   if (exec.agent === undefined) return undefined;
   const path = editPath(exec.arguments);
   if (path === undefined) return undefined;
@@ -260,6 +354,41 @@ async function observeAndRetryMutation(
     );
   } finally {
     observationRetryCallIds.delete(retryId);
+  }
+}
+
+/**
+ * Best-effort observation refresh for anchor failures the plugin must not
+ * retry blindly: re-reading updates the session's observed version so the
+ * model's next retry is not additionally blocked by `FS_NOT_OBSERVED`.
+ * @param exec - Failed guarded mutation.
+ * @param tools - Active host tool runtime.
+ */
+async function refreshObservation(
+  exec: ToolDispatchExecution,
+  tools: NonNullable<ReturnType<typeof getToolRuntime>>,
+): Promise<void> {
+  if (!isObservationMutation(exec.name, exec.arguments)) return;
+  if (exec.agent === undefined) return;
+  const path = editPath(exec.arguments);
+  if (path === undefined) return;
+
+  let readName: string | undefined;
+  if (tools.get("read", exec.agent) !== undefined) {
+    readName = "read";
+  } else if (
+    exec.name === "str_replace_editor" &&
+    tools.get("str_replace_editor", exec.agent) !== undefined
+  ) {
+    readName = "str_replace_editor";
+  }
+  if (readName === undefined) return;
+  const readArgs =
+    readName === "read" ? { file_path: path } : { command: "view", path };
+  try {
+    await executeNestedTool(exec, tools, readName, readArgs, "observe-refresh");
+  } catch {
+    // Refresh is opportunistic; the original error below stays authoritative.
   }
 }
 
@@ -381,6 +510,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     autoObserveFiles: userConfig.autoObserveFiles ?? true,
     autoClampRanges: userConfig.autoClampRanges ?? true,
     injectPrompt: userConfig.injectPrompt ?? true,
+    errorHints: userConfig.errorHints ?? true,
     persistPassthrough: userConfig.persistPassthrough ?? false,
   };
 
@@ -510,6 +640,10 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       next: () => Promise<ToolExecutionResult>,
     ): Promise<ToolExecutionResult> => {
       await restoreReady;
+      // The plugin's own nested recoveries re-enter this waterfall. They carry
+      // already-normalized arguments, so observing them would double-count one
+      // user-facing call as several interceptions.
+      if (isSelfNestedExec(exec)) return next();
       const rawArgsStr = JSON.stringify(exec.arguments ?? {}) ?? "{}";
       const startTime = Date.now();
       const eventId = `norm_${startTime}_${Math.random().toString(36).slice(2, 8)}`;
@@ -525,21 +659,20 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           : 0;
 
       let wasHealed = false;
-      let healCategory:
-        | "INVALID_ARGS"
-        | "RANGE_CLAMP"
-        | "CODE_WRAP"
-        | "RUN_CODE_DESC"
-        | "RUN_CODE_SYNTAX"
-        | "INNER_DESC"
-        | "FS_OBSERVED"
-        | "PASSTHROUGH" = "PASSTHROUGH";
+      let healCategory: NormalizerCategory = "PASSTHROUGH";
       let normalizedPreview: string | undefined;
       const changes: string[] = [];
 
       // 1. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
       if (exec.name === "run_code" && config.autoWrapRunCode) {
         const originalObj = objectValue(exec.arguments);
+        const normalized = normalizeRunCodeArguments(exec.arguments);
+        // An empty program would succeed as a no-op and hide the model error;
+        // leave the original arguments for the host to reject loudly instead
+        // of claiming a heal.
+        if (normalized.code.trim().length === 0) {
+          normalizedPreview = undefined;
+        } else {
         const isCmdPass =
           originalObj !== undefined &&
           ("command" in originalObj || "cmd" in originalObj);
@@ -553,8 +686,6 @@ export function apply(ctx: any, userConfig: Config = {}): void {
             : undefined;
         const hasMarkdownFence =
           rawCode !== undefined && stripMarkdownFences(rawCode) !== rawCode;
-
-        const normalized = normalizeRunCodeArguments(exec.arguments);
 
         const normalizedArgs = JSON.stringify(normalized);
         const runCodeChanged = !runCodeArgsMatch(exec.arguments, normalized);
@@ -615,6 +746,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         }
 
         exec.arguments = normalized;
+        }
       }
 
       // 2. Normalize editor arguments (relative paths, view ranges)
@@ -672,21 +804,41 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         // Do not pre-read every mutation. Only the guarded-mutation failure
         // triggers one read followed by one standard nested retry, so normal
         // edits/writes pay no extra tool call and the retry remains scoped to the
-        // original session.
+        // original session. FS_STALE_VERSION is retried the same way: the fresh
+        // read updates the observed version before the same mutation runs again.
         if (
           config.autoObserveFiles &&
           !isObservationRetry(exec) &&
           tools &&
-          resultHasCode(result, "FS_NOT_OBSERVED")
+          (resultHasCode(result, "FS_NOT_OBSERVED") ||
+            resultHasCode(result, "FS_STALE_VERSION"))
         ) {
+          const staleRetry = resultHasCode(result, "FS_STALE_VERSION");
           const retried = await observeAndRetryMutation(exec, tools);
           if (retried !== undefined) {
             wasHealed = true;
             healCategory = "FS_OBSERVED";
             normalizedPreview = `Read ${editPath(exec.arguments) ?? "file"} then retry`;
-            changes.push("读取目标文件后重试修改");
+            changes.push(
+              staleRetry ? "重读最新版本后重试修改" : "读取目标文件后重试修改",
+            );
             result = retried;
           }
+        }
+        // Anchor failures must not be retried blindly with the same arguments.
+        // A best-effort refresh still helps: it updates the observed version so
+        // the model's next retry is not additionally blocked. The original
+        // error stays authoritative and the call is not counted as healed.
+        if (
+          config.autoObserveFiles &&
+          !isSelfNestedExec(exec) &&
+          tools &&
+          result.isError === true &&
+          (resultHasCode(result, "FS_EDIT_NOT_FOUND") ||
+            resultHasCode(result, "FS_AMBIGUOUS_EDIT"))
+        ) {
+          await refreshObservation(exec, tools);
+          changes.push("已预读刷新文件观察态，便于下次重试");
         }
         if (
           config.autoClampRanges &&
@@ -704,6 +856,50 @@ export function apply(ctx: any, userConfig: Config = {}): void {
               changes.push(`按文件真实行数修正 view_range（${lineCount} 行）`);
               result = retried.result;
             }
+          }
+        }
+        // A pre-dispatch normalization that did not address the final error is
+        // not a failed heal: attribute it honestly as an unrelated failure so
+        // the healing rate measures real efficacy. Retries (FS_OBSERVED and
+        // RANGE_CLAMP range retries) always own their outcome; UNKNOWN_TOOL
+        // bridging returns before reaching this point.
+        if (
+          result.isError === true &&
+          wasHealed &&
+          healCategory !== "PASSTHROUGH" &&
+          healCategory !== "FS_OBSERVED" &&
+          healCategory !== "RANGE_CLAMP" &&
+          !healMatchesError(
+            healCategory,
+            errorCode(result.isError ? result.error : undefined),
+            resultErrorText(result),
+          )
+        ) {
+          changes.push(
+            `修复尝试未命中终错（${(resultErrorText(result) ?? "未知错误").slice(0, 60)}），计入未修复`,
+          );
+          wasHealed = false;
+          healCategory = "PASSTHROUGH";
+        }
+        // Unrecoverable errors still benefit from one appended hint: the model
+        // receives actionable guidance in the same round-trip instead of
+        // failing blindly again. The original error text is always preserved.
+        if (config.errorHints && result.isError === true) {
+          const failureText = resultErrorText(result) ?? "";
+          if (
+            resultHasCode(result, "UNKNOWN_TOOL") &&
+            failureText.includes("only `run_code` is callable directly")
+          ) {
+            result = appendResultHint(result, collapsedCallHint(exec.name));
+          } else if (
+            exec.name === "run_code" &&
+            healCategory !== "RUN_CODE_SYNTAX" &&
+            isSyntaxLikeRunFailure(
+              errorCode(result.isError ? result.error : undefined),
+              failureText,
+            )
+          ) {
+            result = appendResultHint(result, SYNTAX_HINT);
           }
         }
         recordEvent({

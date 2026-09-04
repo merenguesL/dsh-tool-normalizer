@@ -208,11 +208,17 @@
 }
 
 .tabActive .tabCount {
-  background: var(--dsw-alias-brand-primary);
-  color: var(--dsw-alias-brand-text, var(--dsw-alias-bg-layer-1));
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
+  color: var(--dsw-alias-brand-primary);
 }
 
 /* ---- Live pane ---- */
+
+.livePane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 
 .toolbar {
   display: flex;
@@ -257,9 +263,9 @@
 .pill:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
 .pillActive {
-  background: var(--dsw-alias-brand-primary);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
   border-color: var(--dsw-alias-brand-primary);
-  color: var(--dsw-alias-brand-text, var(--dsw-alias-bg-layer-1));
+  color: var(--dsw-alias-brand-primary);
 }
 
 .countBadge {
@@ -282,7 +288,10 @@
   border-radius: 10px;
   background: var(--dsw-alias-bg-layer-2);
   overflow: hidden;
+  transition: border-color 120ms ease;
 }
+
+.traceCard:hover { border-color: var(--dsw-alias-border-l3); }
 
 .traceHeader {
   display: flex;
@@ -342,6 +351,7 @@
 }
 
 .statusTextFail { color: var(--dsw-alias-state-error-primary); }
+.statusTextPass { color: var(--dsw-alias-label-dimmed); }
 
 .timeText {
   font-size: 12px;

@@ -405,8 +405,7 @@ describe("dsh-tool-normalizer plugin", () => {
     });
   });
 
-  it("uses the editor-reported line count to retry an out-of-bounds view range", async () => {
-    const ctx = createMockContext();
+  it("uses the editor-reported line count to retry an out-of-bounds view range", async () => {    const ctx = createMockContext();
     const agent = { session: { header: { cwd: "/workspace" } } };
     const calls: Array<Record<string, unknown>> = [];
     ctx.tools.get.mockImplementation((name: string) =>
@@ -451,5 +450,240 @@ describe("dsh-tool-normalizer plugin", () => {
       name: "str_replace_editor",
       arguments: { path: "/workspace/notes.md", view_range: [1, 10] },
     });
+  });
+
+  it("leaves an empty non-string command for the host to reject instead of healing it into a no-op", async () => {
+    const ctx = createMockContext();
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, { autoWrapRunCode: true });
+
+    const exec = {
+      name: "run_code",
+      arguments: { command: [], description: "placeholder" },
+      callId: "empty-cmd-1",
+      rootCallId: "empty-cmd-1",
+      token: "tok",
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "OK" }],
+      isError: false,
+    });
+
+    await ctx.runWaterfall("tools/execute", exec, next);
+
+    // The invalid `command` field is preserved so the host schema rejects it
+    // loudly; an empty synthesized program would succeed silently instead.
+    expect(exec.arguments).toMatchObject({ command: [] });
+    expect(exec.arguments).not.toHaveProperty("code");
+    expect(tracker.getSnapshot().healedSuccess).toBe(0);
+  });
+
+  it("does not record the plugin's own nested recoveries as interceptions", async () => {
+    const ctx = createMockContext();
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, {});
+
+    const exec = {
+      name: "read",
+      arguments: { file_path: "/workspace/notes.md" },
+      callId: "c3:normalizer:observe-read",
+      rootCallId: "root-3",
+      token: "tok",
+      parent: Symbol("parent"),
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "notes" }],
+      isError: false,
+    });
+
+    const result = await ctx.runWaterfall("tools/execute", exec, next);
+
+    expect(result.isError).toBe(false);
+    expect(tracker.getSnapshot().totalIntercepted).toBe(0);
+  });
+
+  it("retries a stale-version mutation the same way as an unobserved one", async () => {
+    const ctx = createMockContext();
+    const agent = { session: { header: { cwd: "/workspace" } } };
+    const calls: Array<Record<string, unknown>> = [];
+    ctx.tools.get.mockImplementation((name: string) => {
+      if (name === "read" || name === "edit") return { name };
+      return undefined;
+    });
+    ctx.tools.execute.mockImplementation(
+      async (input: Record<string, unknown>) => {
+        calls.push(input);
+        return {
+          isError: false,
+          value: { ok: true },
+          content: [{ type: "text", text: `${String(input.name)} ok` }],
+        };
+      },
+    );
+
+    apply(ctx as any, { autoObserveFiles: true });
+
+    const exec = {
+      name: "edit",
+      arguments: { file_path: "src/file.ts", old_string: "a", new_string: "b" },
+      callId: "stale-1",
+      rootCallId: "root-stale-1",
+      token: Symbol("token"),
+      agent,
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      isError: true,
+      content: [{ type: "text", text: "file changed" }],
+      error: {
+        message: "file changed since it was read",
+        info: { code: "FS_STALE_VERSION" },
+      },
+    });
+
+    const result = await ctx.runWaterfall("tools/execute", exec, next);
+
+    expect(result.isError).toBe(false);
+    expect(calls.map((call) => call.name)).toEqual(["read", "edit"]);
+    const record = tracker.getSnapshot().recentRecords[0];
+    expect(record?.category).toBe("FS_OBSERVED");
+    expect(record?.normalizationSummary).toContain("重读最新版本后重试修改");
+  });
+
+  it("attributes a pre-dispatch heal honestly when the final error is unrelated", async () => {
+    const ctx = createMockContext();
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, { autoWrapRunCode: true });
+
+    const exec = {
+      name: "run_code",
+      arguments: { code: "const value = 1;\nreturn value;" },
+      callId: "attr-1",
+      rootCallId: "attr-1",
+      token: "tok",
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      isError: true,
+      content: [{ type: "text", text: "parse failed" }],
+      error: {
+        message: "code run failed (exception): Expected ',', got 'ident'",
+        info: { code: "CODE_RUN_FAILED" },
+      },
+    });
+
+    await ctx.runWaterfall("tools/execute", exec, next);
+
+    // The description completion was real but did not address a syntax
+    // failure, so the call counts as an unhealed failure, not a failed heal.
+    const snapshot = tracker.getSnapshot();
+    expect(snapshot.healedFailed).toBe(0);
+    expect(snapshot.passThroughFailed).toBe(1);
+    const record = snapshot.recentRecords[0];
+    expect(record?.category).toBe("PASSTHROUGH");
+    expect(record?.wasHealed).toBe(false);
+    expect(record?.normalizationSummary).toContain("计入未修复");
+  });
+
+  it("appends a recovery hint to a PTC-collapsed direct call it cannot bridge", async () => {
+    const ctx = createMockContext();
+    // Nothing visible in scope, so bridging is unavailable and the hint path
+    // is the only help the plugin can offer.
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, { autoBridgeDirectTools: true, errorHints: true });
+
+    const exec = {
+      name: "bash",
+      arguments: { command: "echo ok", description: "Echo" },
+      callId: "hint-1",
+      rootCallId: "root-hint-1",
+      token: Symbol("token"),
+      agent: { session: { id: "session-hint" } },
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: 'Error: unknown tool "bash": only `run_code` is callable directly — call `bash` from inside a `run_code` program instead',
+        },
+      ],
+      error: {
+        message:
+          'unknown tool "bash": only `run_code` is callable directly — call `bash` from inside a `run_code` program instead',
+        info: { code: "UNKNOWN_TOOL" },
+      },
+    });
+
+    const result = await ctx.runWaterfall("tools/execute", exec, next);
+
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ text?: string }>)
+      .map((block) => block.text ?? "")
+      .join("\n");
+    expect(text).toContain('only `run_code` is callable directly');
+    expect(text).toContain("[tool-normalizer hint]");
+    expect(text).toContain("await tools.bash");
+  });
+
+  it("appends a syntax hint to an unrepairable run_code parse failure", async () => {
+    const ctx = createMockContext();
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, { autoWrapRunCode: true, errorHints: true });
+
+    const exec = {
+      name: "run_code",
+      arguments: { code: "return 1;", description: "Return one" },
+      callId: "hint-2",
+      rootCallId: "root-hint-2",
+      token: "tok",
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      isError: true,
+      content: [{ type: "text", text: "parse failed" }],
+      error: {
+        message: "code run failed (exception): Expected ',', got 'ident'",
+        info: { code: "CODE_RUN_FAILED" },
+      },
+    });
+
+    const result = await ctx.runWaterfall("tools/execute", exec, next);
+
+    const text = (result.content as Array<{ text?: string }>)
+      .map((block) => block.text ?? "")
+      .join("\n");
+    expect(text).toContain("parse failed");
+    expect(text).toContain("[tool-normalizer hint]");
+  });
+
+  it("leaves error results untouched when error hints are disabled", async () => {
+    const ctx = createMockContext();
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, { autoWrapRunCode: true, errorHints: false });
+
+    const exec = {
+      name: "run_code",
+      arguments: { code: "return 1;", description: "Return one" },
+      callId: "hint-3",
+      rootCallId: "root-hint-3",
+      token: "tok",
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      isError: true,
+      content: [{ type: "text", text: "parse failed" }],
+      error: {
+        message: "code run failed (exception): Expected ',', got 'ident'",
+        info: { code: "CODE_RUN_FAILED" },
+      },
+    });
+
+    const result = await ctx.runWaterfall("tools/execute", exec, next);
+
+    expect(result.content).toEqual([{ type: "text", text: "parse failed" }]);
   });
 });

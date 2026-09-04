@@ -26,6 +26,18 @@ Detailed root-cause analysis identified four primary structural error drivers:
 4. **File System Safety Policy Violations (5.5%, 30 cases)**:
    - Violating DSH's read-before-edit invariant (`FS_NOT_OBSERVED`), editor `view_range` line count out-of-bounds, or using relative paths instead of absolute paths.
 
+### Production rollout effects (v0.4.0 · 192 sessions / 15,460 calls)
+
+Sessions before the plugin's first activation (7,182 calls, **7.95%** error rate) versus after (8,289 calls, **2.20%**):
+
+- `INVALID_ARGS` missing-description failures fell from 74 to 2 (outer `RUN_CODE_DESC` plus preemptive `INNER_DESC` heals).
+- Inner `description` omissions surfacing as `CODE_RUN_FAILED` fell from 45 to 0 (598 preemptive `INNER_DESC` successes in the plugin log).
+- `FS_NOT_OBSERVED` fell from 10 to 0 (169 observe-then-retry successes).
+- `UNKNOWN_TOOL` halved (71 → 35) but persists: PTC-collapsed calls are denied before the waterfall and stay unobservable to any plugin, so v0.4.0 appends a reissue hint to those errors instead of silently dropping them.
+- Residual `CODE_RUN_FAILED` syntax failures are semantic breakage no safe rewrite can guess (Python pasted as JS, wrong APIs); v0.4.0 appends a parse-failure hint for those.
+
+Counterfactual upper bound: without the 837 healed successes, the post window would have shown ≈12.3% instead of 2.20%. Token savings sum measured retransmission avoided (token-meter pressure × skipped round-trips), never a hardcoded constant. Since v0.4.0 the plugin's own nested recoveries are excluded from interception counts, so the denominator is user-facing calls only.
+
 ---
 
 ## 🎯 What Problems `dsh-tool-normalizer` Solves
@@ -56,20 +68,22 @@ Detailed root-cause analysis identified four primary structural error drivers:
 ### Key Features
 
 - 🛠️ **`run_code` Schema Auto-Healing**:
-  - Automatically wraps `{"command": "git status"}` or `{"cmd": "..."}` into valid `run_code` JavaScript dispatches.
+  - Automatically wraps `{"command": "git status"}` or `{"cmd": "..."}` into valid `run_code` JavaScript dispatches. Empty or non-string commands are left for the host to reject loudly instead of healing into a silent no-op.
   - Fills in missing `description` fields with sensible contextual defaults.
   - Strips accidental Markdown code block fences (e.g. ````typescript ...````).
   - **Program syntax self-healing**: when the emitted `code` does not parse, repairs the three mechanical breakage classes the host's async-function executor rejects — truncated tails (code ending inside an unclosed string or call), Python-style triple-quoted strings (`'''`/`"""` spans containing a newline) rewritten as escaped template literals, and stray unescaped backticks inside template literals. Every repair is re-verified with the same `new AsyncFunction` parse the host uses; valid programs are never touched.
 - 🌉 **Code-Mode Direct Tool Bridging**:
-  - When an `UNKNOWN_TOOL` result reaches `tools/execute` and the target is visible in the active agent scope, the plugin re-dispatches it through the host's `tools.execute()` API as a nested call, preserving agent/session ownership, cancellation, contexts, and terminal state.
-  - Scope note: under the PTC (`code`) presentation collapse, the host may reject a direct call before any listener runs; a plugin cannot intercept that path. The plugin never invokes a tool definition's `execute()` method directly.
+  - When an `UNKNOWN_TOOL` result reaches `tools/execute` and the target is visible in the active agent scope, the plugin re-dispatches it through the host's `tools.execute()` API as a nested call, preserving agent/session ownership, cancellation, contexts, and terminal state. Bridgeable names cover `bash/read/write/grep/edit/glob/str_replace_editor/job_output/job_kill` plus `web_fetch/web_search/todo_write/skill/ask_user_question`.
+  - Scope note: under the PTC (`code`) presentation collapse, the host rejects a direct call before any listener runs; a plugin cannot intercept that path. For those errors v0.4.0 appends a ready-to-paste `run_code` reissue hint to the original error text instead. The plugin never invokes a tool definition's `execute()` method directly.
+- 💡 **Unrecoverable-Error Hints** (`errorHints`, default on):
+  - PTC-collapsed direct calls and unrepairable `run_code` parse failures keep their original error text with one appended actionable hint, so the model can correct itself in the same round-trip. Set `errorHints: false` to preserve byte-identical host errors.
 - 🩹 **Inner-Call Description Injection**:
   - Before a `run_code` program executes, inserts a generated description only into a `tools.*()` call whose active tool schema marks `description` as required. Open schemas such as `read`, `glob`, and `grep` are left unchanged.
 - 📐 **Editor Parameter & Bounds Normalization**:
   - Corrects structural and inverted `view_range` values in `str_replace_editor`; when the real error reports a line count, it retries with that bound and preserves the `-1` end-of-file sentinel.
   - Resolves relative file paths to absolute paths against the session working directory.
 - 🩹 **Observe-then-Retry Recovery**:
-  - Only after `FS_NOT_OBSERVED` does the plugin read the target and retry the mutation once through the host dispatcher; normal calls do not pay for a speculative read.
+  - After `FS_NOT_OBSERVED` or `FS_STALE_VERSION`, the plugin reads the target and retries the mutation once through the host dispatcher; anchor failures (`FS_EDIT_NOT_FOUND`, `FS_AMBIGUOUS_EDIT`) are never retried blindly — a best-effort refresh updates the observed version so the next model retry is not additionally blocked. Normal calls do not pay for a speculative read.
 - 📈 **Projected Token Savings**:
   - Measures the input tokens each successful healing avoids from the host's token-meter: the session's one-request context pressure multiplied by the skipped model round-trips, shown in the dashboard. A composition without `@deepseek-ai/dsh-token-meter` reports zero instead of guessing.
   - Live observability: every interception updates aggregate counters. Healing attempts and failures append detailed JSONL events to `~/.dsh/tool-normalizer-events.jsonl`; successful untouched pass-through calls are aggregated in `tool-normalizer-summary.json` by default instead of expanding the detail log.
@@ -80,6 +94,7 @@ Detailed root-cause analysis identified four primary structural error drivers:
   - Displays real-time KPI metrics (Total Interceptions, Auto-Healed Count, Healing Success Rate %, Unrecovered Errors).
   - Visual breakdown by tool and category with progress meters.
   - Filterable live table of execution logs showing original input vs. normalized payload.
+  - v0.4.0 UI fixes: active filter pills and tabs no longer render unreadable filled labels under dark themes (tinted ring + brand text instead of filled background); untouched pass-through rows use a neutral tone instead of success green; a sixth rule card documents error hints. No screenshot changes — layout and information architecture are unchanged.
 
 ---
 
@@ -151,6 +166,7 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
         autoObserveFiles: true
         autoClampRanges: true
         injectPrompt: true
+        errorHints: true
         persistPassthrough: false
 ```
 
@@ -161,9 +177,10 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
 | `autoObserveFiles` | `boolean` | `true` | After `FS_NOT_OBSERVED`, read the target and retry one edit/write through the host dispatcher. |
 | `autoClampRanges` | `boolean` | `true` | Correct editor ranges and resolve relative paths against the session directory. |
 | `injectPrompt` | `boolean` | `true` | Dynamically register prompt guidelines with `ctx.systemPrompt`. Static text only — never breaks prefix caching. |
+| `errorHints` | `boolean` | `true` | Append one actionable hint to unrecoverable PTC/syntax errors while preserving the original error text. |
 | `persistPassthrough` | `boolean` | `false` | Persist successful untouched pass-through calls as detailed JSONL events; failures and healing attempts are always retained. |
 
-Healing success rate is `healedSuccess / (healedSuccess + healedFailed)` and excludes untouched pass-through failures. Successful untouched calls are kept in aggregate counters and the compact `tool-normalizer-summary.json`, not one detail line per call.
+Healing success rate is `healedSuccess / (healedSuccess + healedFailed)` and excludes untouched pass-through failures. A pre-dispatch normalization whose final error belongs to a different failure class is attributed as an unrelated pass-through failure rather than a failed heal, so the rate measures real efficacy. Successful untouched calls are kept in aggregate counters and the compact `tool-normalizer-summary.json`, not one detail line per call.
 
 The token-savings KPI sums measured per-heal input tokens: each successful heal credits `skipped model round-trips × token-meter request pressure`, i.e. the prompt a further request would have re-submitted. It requires `@deepseek-ai/dsh-token-meter` in the composition; without it the figure stays `0` instead of using a hardcoded per-retry constant.
 
