@@ -1,7 +1,7 @@
 {
   "name": "dsh-tool-normalizer",
   "description": "Auto-healing, argument normalization, Code-Mode bridging and execution diagnostics for DeepSeek Harness",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "homepage": "https://github.com/merenguesL/dsh-tool-normalizer#readme",
   "repository": {
     "type": "git",

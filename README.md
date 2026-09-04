@@ -4,9 +4,35 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/dsh-tool-normalizer.svg)](https://www.npmjs.com/package/dsh-tool-normalizer)
 
-> An auto-healing, argument normalization, Code-Mode direct tool bridging, and execution diagnostics plugin for [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
+> An auto-healing layer for model tool calls: it silently fixes the failures that used to cost you a full retry round-trip, and shows you the receipts.
 
 [中文文档 (README.zh.md)](./README.zh.md)
+
+![Tool Normalizer dashboard: 97.7% healing rate, 837 healed calls, 153.3M tokens saved](assets/dashboard-hero.png)
+
+## Why this exists
+
+Every failed tool call costs a full model round-trip: the error comes back, the model re-reads the entire conversation context, and tries again. In a large workspace that retry resubmits ~180k input tokens — so a ~5% tool failure rate quietly inflates your token bill by more than 2× on the affected turns, and your agent visibly stumbles every few minutes.
+
+This plugin sits on the `tools/execute` pipeline and repairs the failure before it ever reaches the model: a missing `description` is filled in, a forgotten file read is performed and the edit retried, a relative path is resolved, an unrecoverable error gets an actionable hint appended. Measured across 192 real sessions (15,460 tool calls):
+
+- Surfaced error rate fell from **7.95% → 2.20%** (about **72% fewer** visible failures).
+- About **82%** of would-be errors were healed automatically (837 healed vs 182 residual).
+- Each heal avoids one full-context retransmission (median ~160k input tokens), totaling **~153M tokens** — roughly **115%** of what the models actually consumed in the same window, i.e. without healing the token spend would have been ~2.2× (estimated: token-meter pressure × skipped round-trips).
+
+What you get is an agent that stops tripping over its own tool calls — plus a dashboard that proves it:
+
+![Before/after diff of a healed file edit](assets/dashboard-trace.png)
+
+## What it does for you
+
+1. **Fixes calls before they fail** — schema mismatches (`command` → `code`, missing `description`, Markdown fences), Code-Mode inner-call descriptions, relative paths and view ranges.
+2. **Retries what is safe to retry** — one scoped read-then-retry for guarded file mutations, one bounded range retry; anchor failures are never retried blindly.
+3. **Shows everything** — KPI cards, per-tool and per-category rankings, and a filterable before/after trace, one click away in Settings:
+
+| Rankings & root causes | Healing rules |
+| --- | --- |
+| ![Per-tool and per-category rankings](assets/dashboard-analytics.png) | ![Six healing rules, all active](assets/dashboard-rules.png) |
 
 ---
 
@@ -94,7 +120,7 @@ Counterfactual upper bound: without the 837 healed successes, the post window wo
   - Displays real-time KPI metrics (Total Interceptions, Auto-Healed Count, Healing Success Rate %, Unrecovered Errors).
   - Visual breakdown by tool and category with progress meters.
   - Filterable live table of execution logs showing original input vs. normalized payload.
-  - v0.4.0 UI fixes: active filter pills and tabs no longer render unreadable filled labels under dark themes (tinted ring + brand text instead of filled background); untouched pass-through rows use a neutral tone instead of success green; a sixth rule card documents error hints. No screenshot changes — layout and information architecture are unchanged.
+  - v0.4.1 UI fixes: active filter pills and tabs no longer render unreadable filled labels under dark themes (tinted ring + brand text instead of filled background); untouched pass-through rows use a neutral tone instead of success green; a sixth rule card documents error hints. Screenshots above were captured from a live deployment (dark hero, light detail views).
 
 ---
 
