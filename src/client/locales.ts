@@ -11,6 +11,10 @@ export const zh = {
  refresh: "刷新数据",
  clear: "清空记录",
  export: "导出诊断报告",
+ repoLink: "GitHub 仓库",
+ repoHint: "访问 GitHub 仓库，欢迎 Star 支持",
+ issueLink: "问题反馈",
+ issueHint: "在 GitHub 上提交 Issue",
 
  // Tabs
  tabLive: "实时拦截流水",
