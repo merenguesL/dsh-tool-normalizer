@@ -545,6 +545,32 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/* JSON token voices: all semantic aliases, checked in both themes. */
+.jsonKey {
+  color: var(--dsw-alias-link);
+  font-weight: 600;
+}
+
+.jsonString { color: var(--dsw-alias-state-success-primary); }
+
+.jsonNumber { color: var(--dsw-alias-state-warn-label); }
+
+.jsonBool {
+  color: var(--dsw-alias-brand-primary);
+  font-weight: 600;
+}
+
+.jsonNull { color: var(--dsw-alias-label-tertiary); }
+
+.jsonEllipsis {
+  margin: 0 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  font-style: normal;
+}
+
 /* ---- Empty state ---- */
 
 .emptyState {

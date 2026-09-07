@@ -11,6 +11,7 @@
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
 import { zh, type NormalizerKey } from "./locales.ts";
+import { JsonBlock } from "./JsonBlock.tsx";
 import type { NormalizerStore, NormalizerState } from "./store.ts";
 import styles from "./NormalizerSection.module.css";
 
@@ -578,11 +579,10 @@ export function NormalizerSection(
                                     : "⧉"}
                                 </button>
                               </div>
-                              <pre
+                              <JsonBlock
+                                code={record.originalArgsPreview || "{}"}
                                 className={`${styles.codeBox} ${styles.codeBefore}`}
-                              >
-                                {record.originalArgsPreview || "{}"}
-                              </pre>
+                              />
                             </div>
                             <div className={styles.diffBlock}>
                               <div className={styles.diffLabelRow}>
@@ -606,11 +606,12 @@ export function NormalizerSection(
                                     : "⧉"}
                                 </button>
                               </div>
-                              <pre
+                              <JsonBlock
+                                code={
+                                  record.normalizedArgsPreview || "（正常放行）"
+                                }
                                 className={`${styles.codeBox} ${styles.codeAfter}`}
-                              >
-                                {record.normalizedArgsPreview || "（正常放行）"}
-                              </pre>
+                              />
                             </div>
                             {record.errorMessage && (
                               <div className={styles.errorBlock}>
