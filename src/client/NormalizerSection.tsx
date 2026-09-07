@@ -32,6 +32,97 @@ export interface NormalizerSectionProps
 const REPO_URL = "https://github.com/merenguesL/dsh-tool-normalizer";
 const ISSUE_URL = "https://github.com/merenguesL/dsh-tool-normalizer/issues";
 
+/** Stroke iconography: one 16px outline voice, `currentColor` everywhere. */
+function StrokeIcon(props: {
+  children: React.ReactNode;
+}): React.ReactElement {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {props.children}
+    </svg>
+  );
+}
+
+function ShieldIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M8 1.5 13.5 3.5v4c0 3.4-2.3 5.9-5.5 7-3.2-1.1-5.5-3.6-5.5-7v-4L8 1.5Z" />
+      <path d="M5.8 7.7l1.6 1.6 2.8-3.1" />
+    </StrokeIcon>
+  );
+}
+
+function PulseIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M1.5 8h2.8l1.4-3.8 3 7.6 1.4-3.8h4.4" />
+    </StrokeIcon>
+  );
+}
+
+function CheckCircleIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <circle cx="8" cy="8" r="6.3" />
+      <path d="M5.2 8.3l1.9 1.9 3.7-4.2" />
+    </StrokeIcon>
+  );
+}
+
+function LayersIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M8 1.8 14.2 4.8 8 7.8 1.8 4.8 8 1.8Z" />
+      <path d="M2.5 8.7 8 11.2l5.5-2.5" />
+      <path d="M2.5 11.7 8 14.2l5.5-2.5" />
+    </StrokeIcon>
+  );
+}
+
+function AlertIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M8 2.2 14.3 13H1.7L8 2.2Z" />
+      <path d="M8 6.4v3" />
+      <circle cx="8" cy="11" r="0.4" fill="currentColor" />
+    </StrokeIcon>
+  );
+}
+
+function ZapIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M8.8 1.5 3.5 9H7l-.8 5.5L11.5 7H8l0.8-5.5Z" />
+    </StrokeIcon>
+  );
+}
+
+function SearchIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <circle cx="7" cy="7" r="4.5" />
+      <path d="M10.5 10.5 14 14" />
+    </StrokeIcon>
+  );
+}
+
+/** Left-edge tone for a trace card from the record outcome. */
+function cardTone(record: { status: string; wasHealed: boolean }): string {
+  if (record.status === "failed") return styles.traceCardFail;
+  if (record.wasHealed) return styles.traceCardOk;
+  return "";
+}
+
 function idleState(): NormalizerState {
   return {
     status: "idle",
@@ -285,14 +376,18 @@ export function NormalizerSection(
 
   return (
     <div className={styles.container}>
-      {/* Header */}
-      <header className={styles.header}>
-        <div className={styles.titleGroup}>
-          <div className={styles.titleRow}>
-            <h2 className={styles.title}>{t("title")}</h2>
-            <span className={styles.versionBadge} title="plugin version">
-              v{__DSH_TOOL_NORMALIZER_VERSION__}
-            </span>
+      {/* Hero header */}
+      <header className={styles.hero}>
+        <div className={styles.heroMain}>
+          <span className={styles.heroMark} aria-hidden="true">
+            <ShieldIcon />
+          </span>
+          <div className={styles.titleGroup}>
+            <div className={styles.titleRow}>
+              <h2 className={styles.title}>{t("title")}</h2>
+              <span className={styles.versionBadge} title="plugin version">
+                v{__DSH_TOOL_NORMALIZER_VERSION__}
+              </span>
             <span className={styles.repoLinks}>
               <a
                 className={styles.repoLink}
@@ -347,6 +442,7 @@ export function NormalizerSection(
           </div>
           <p className={styles.subtitle}>{t("subtitle")}</p>
         </div>
+        </div>
         <div className={styles.headerActions}>
           <button
             type="button"
@@ -380,26 +476,61 @@ export function NormalizerSection(
       {/* KPI row */}
       <section className={styles.kpiGrid}>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t("kpiRate")}</span>
+          <span className={styles.kpiHead}>
+            <span
+              className={`${styles.kpiIcon} ${styles.kpiIconAccent}`}
+              aria-hidden="true"
+            >
+              <PulseIcon />
+            </span>
+            <span className={styles.kpiTitle}>{t("kpiRate")}</span>
+          </span>
           <span className={`${styles.kpiValue} ${styles.kpiValueAccent}`}>
             {stats.healingSuccessRate}%
+          </span>
+          <span className={styles.kpiMeter} aria-hidden="true">
+            <span
+              className={styles.kpiMeterFill}
+              style={{ width: `${Math.min(100, stats.healingSuccessRate)}%` }}
+            />
           </span>
           <span className={styles.kpiDesc}>{t("kpiRateDesc")}</span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t("kpiHealed")}</span>
+          <span className={styles.kpiHead}>
+            <span
+              className={`${styles.kpiIcon} ${styles.kpiIconSuccess}`}
+              aria-hidden="true"
+            >
+              <CheckCircleIcon />
+            </span>
+            <span className={styles.kpiTitle}>{t("kpiHealed")}</span>
+          </span>
           <span className={`${styles.kpiValue} ${styles.kpiValueSuccess}`}>
             {stats.healedSuccess}
           </span>
           <span className={styles.kpiDesc}>{t("kpiHealedDesc")}</span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t("kpiTotal")}</span>
+          <span className={styles.kpiHead}>
+            <span className={styles.kpiIcon} aria-hidden="true">
+              <LayersIcon />
+            </span>
+            <span className={styles.kpiTitle}>{t("kpiTotal")}</span>
+          </span>
           <span className={styles.kpiValue}>{stats.totalIntercepted}</span>
           <span className={styles.kpiDesc}>{t("kpiTotalDesc")}</span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>{t("kpiFailed")}</span>
+          <span className={styles.kpiHead}>
+            <span
+              className={`${styles.kpiIcon} ${styles.kpiIconDanger}`}
+              aria-hidden="true"
+            >
+              <AlertIcon />
+            </span>
+            <span className={styles.kpiTitle}>{t("kpiFailed")}</span>
+          </span>
           <span
             className={`${styles.kpiValue} ${stats.healedFailed + stats.passThroughFailed > 0 ? styles.kpiValueDanger : ""}`}
           >
@@ -408,9 +539,17 @@ export function NormalizerSection(
           <span className={styles.kpiDesc}>{t("kpiFailedDesc")}</span>
         </div>
         <div className={styles.kpiCard}>
-          <span className={styles.kpiTitle}>
-            {t("kpiSavedTokens")}
-            <span className={styles.estimateBadge}>{t("estimateBadge")}</span>
+          <span className={styles.kpiHead}>
+            <span
+              className={`${styles.kpiIcon} ${styles.kpiIconWarn}`}
+              aria-hidden="true"
+            >
+              <ZapIcon />
+            </span>
+            <span className={styles.kpiTitle}>
+              {t("kpiSavedTokens")}
+              <span className={styles.estimateBadge}>{t("estimateBadge")}</span>
+            </span>
           </span>
           <span className={`${styles.kpiValue} ${styles.kpiValueSuccess}`}>
             {formatTokens(stats.estimatedTokensSaved)}
@@ -457,13 +596,19 @@ export function NormalizerSection(
           {hasData ? (
             <>
               <div className={styles.toolbar}>
-                <input
-                  type="search"
-                  className={styles.searchInput}
-                  placeholder={t("searchPlaceholder")}
-                  value={state.searchQuery}
-                  onChange={(e) => controller?.setSearchQuery(e.target.value)}
-                />
+                <span className={styles.searchWrap}>
+                  <span className={styles.searchIcon} aria-hidden="true">
+                    <SearchIcon />
+                  </span>
+                  <input
+                    type="search"
+                    className={styles.searchInput}
+                    placeholder={t("searchPlaceholder")}
+                    aria-label={t("searchPlaceholder")}
+                    value={state.searchQuery}
+                    onChange={(e) => controller?.setSearchQuery(e.target.value)}
+                  />
+                </span>
                 <div className={styles.pills}>
                   {(
                     [
@@ -512,7 +657,10 @@ export function NormalizerSection(
                   {filteredRecords.map((record) => {
                     const isExpanded = expandedIds.has(record.id);
                     return (
-                      <li key={record.id} className={styles.traceCard}>
+                      <li
+                        key={record.id}
+                        className={`${styles.traceCard} ${cardTone(record)}`}
+                      >
                         <div className={styles.traceHeader}>
                           <div className={styles.traceMeta}>
                             <span className={styles.badgeTool}>
@@ -637,7 +785,9 @@ export function NormalizerSection(
             </>
           ) : (
             <div className={styles.emptyState}>
-              <div className={styles.emptyIcon}>🛡️</div>
+              <span className={styles.emptyMark} aria-hidden="true">
+                <ShieldIcon />
+              </span>
               <div className={styles.emptyTitle}>{t("noData")}</div>
               <p className={styles.emptyDesc}>{t("noDataDesc")}</p>
             </div>
@@ -651,7 +801,9 @@ export function NormalizerSection(
           <div
             className={`${styles.healthCard} ${hasData ? "" : styles.healthCardMuted}`}
           >
-            <span className={styles.healthIcon}>🛡️</span>
+            <span className={styles.healthMark} aria-hidden="true">
+              <ShieldIcon />
+            </span>
             <div>
               <div className={styles.healthTitle}>{t("healthScoreTitle")}</div>
               <p className={styles.healthDesc}>{healthText()}</p>
