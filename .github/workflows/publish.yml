@@ -12,6 +12,12 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # A tag push and its Release fire two runs for the same version. Serialize
+    # them so the loser observes the winner's publish and skips cleanly
+    # instead of racing it into E403.
+    concurrency:
+      group: npm-publish-${{ github.ref }}
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
@@ -40,10 +46,21 @@ jobs:
         run: |
           PACKAGE_NAME=$(node -p "require('./package.json').name")
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version > /dev/null 2>&1; then
+          # Registry reads lag behind writes; retry briefly before concluding
+          # that a version is missing (or present, in the post-race check).
+          npm_view_published() {
+            for _ in 1 2 3 4 5 6; do
+              if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version > /dev/null 2>&1; then
+                return 0
+              fi
+              sleep 5
+            done
+            return 1
+          }
+          if npm_view_published; then
             echo "✓ Version $PACKAGE_VERSION of $PACKAGE_NAME is already published on npm. Skipping publication."
           else
             # A concurrent run (tag push + release) may publish first; a
             # post-race already-published state still counts as success.
-            npm publish --access public || npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version > /dev/null 2>&1
+            npm publish --access public || npm_view_published
           fi
