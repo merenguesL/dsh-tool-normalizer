@@ -687,7 +687,6 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         const hasMarkdownFence =
           rawCode !== undefined && stripMarkdownFences(rawCode) !== rawCode;
 
-        const normalizedArgs = JSON.stringify(normalized);
         const runCodeChanged = !runCodeArgsMatch(exec.arguments, normalized);
         if (isCmdPass) changes.push("将 command/cmd 转为 run_code.code");
         if (isMissingDesc) changes.push("补全 run_code.description");
@@ -700,7 +699,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           else if (hasMarkdownFence) healCategory = "CODE_WRAP";
           else if (isMissingDesc) healCategory = "RUN_CODE_DESC";
           else healCategory = "INVALID_ARGS";
-          normalizedPreview = compactPreview(normalizedArgs);
+          // Serialize only for a real change: healthy calls (the common
+          // case) skip a second full stringify of the program body.
+          normalizedPreview = compactPreview(JSON.stringify(normalized));
         }
 
         // 2b. Preemptive inner-call repair: inject missing descriptions into the
@@ -709,12 +710,21 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         const codeBody =
           typeof normalized.code === "string" ? normalized.code : undefined;
         if (codeBody !== undefined) {
+          // One program can reference the same tool dozens of times; resolve
+          // each distinct schema once per dispatch instead of per occurrence.
+          const descriptionCache = new Map<string, boolean>();
           const inner = injectInnerDescriptions(
             codeBody,
             String(normalized.description ?? ""),
-            (toolName) =>
-              tools !== undefined &&
-              toolRequiresDescription(tools, toolName, exec.agent),
+            (toolName) => {
+              const cached = descriptionCache.get(toolName);
+              if (cached !== undefined) return cached;
+              const required =
+                tools !== undefined &&
+                toolRequiresDescription(tools, toolName, exec.agent);
+              descriptionCache.set(toolName, required);
+              return required;
+            },
           );
           if (inner.injected > 0) {
             normalized.code = inner.code;

@@ -246,6 +246,12 @@ npm publish --access public
 
 ---
 
+## Known Limitations
+
+- **No path normalization for `read`/`write`.** The `read`/`write`/`edit` tool family resolves relative paths against the session working directory by itself; only `str_replace_editor` rejects them. Normalizing those calls would count heals for invocations that would have succeeded anyway, so the plugin deliberately leaves them untouched to keep the healing rate honest.
+
+---
+
 ## 🧪 Testing & Verification
 
 ```sh
