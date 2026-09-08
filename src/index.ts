@@ -14,13 +14,13 @@ import {
   nestedCallId,
 } from "./normalizers/nested-dispatch.ts";
 import { compactPreview } from "./normalizers/preview.ts";
-import { normalizeEditorArguments } from "./normalizers/range-clamper.ts";
+import { normalizeEditorArguments, normalizeReadArguments } from "./normalizers/range-clamper.ts";
 import {
   normalizeRunCodeArguments,
   stripMarkdownFences,
 } from "./normalizers/run-code.ts";
 import { repairRunCodeSyntax } from "./normalizers/run-code-syntax.ts";
-import { registerPromptGuidance } from "./prompt.ts";
+import { registerPromptGuidance, getGuidanceText, setGuidanceText, resetGuidanceText, DEFAULT_GUIDANCE_TEXT, DEFAULT_GUIDANCE_HEADING, refreshTopErrors } from "./prompt.ts";
 import {
   appendEvent,
   clearLog,
@@ -44,6 +44,7 @@ export * from "./normalizers/run-code.ts";
 export * from "./normalizers/run-code-syntax.ts";
 export * from "./normalizers/range-clamper.ts";
 export * from "./normalizers/direct-bridge.ts";
+export { DEFAULT_GUIDANCE_TEXT, DEFAULT_GUIDANCE_HEADING, getGuidanceText, setGuidanceText, resetGuidanceText } from "./prompt.ts";
 export * from "./prompt.ts";
 
 /** Cordis plugin identifier. */
@@ -137,7 +138,8 @@ function healMatchesError(
     | "CODE_WRAP"
     | "RUN_CODE_DESC"
     | "RUN_CODE_SYNTAX"
-    | "INNER_DESC",
+    | "INNER_DESC"
+    | "READ_ARGS",
   errorCode: string | undefined,
   errorMessage: string | undefined,
 ): boolean {
@@ -146,6 +148,10 @@ function healMatchesError(
     case "INVALID_ARGS":
     case "RUN_CODE_DESC":
     case "CODE_WRAP":
+    case "READ_ARGS":
+      return (
+        /offset|start|limit/i.test(text)
+      );
     case "INNER_DESC":
       return (
         errorCode === "INVALID_ARGS" ||
@@ -453,7 +459,8 @@ function avoidedRoundTrips(category: NormalizerCategory): number {
     category === "CODE_WRAP" ||
     category === "RUN_CODE_DESC" ||
     category === "RUN_CODE_SYNTAX" ||
-    category === "INNER_DESC"
+    category === "INNER_DESC" ||
+    category === "READ_ARGS"
   )
     return 1;
   return 0;
@@ -539,6 +546,12 @@ export function apply(ctx: any, userConfig: Config = {}): void {
   ctx.logger?.info?.(
     `[tool-normalizer] active — intercepting tools/execute; history log: ${statsLogPath()}`,
   );
+  // Snapshot top-errors once at session start for KV-cache-stable prompt section.
+  // This captures what the tracker restored from disk history so the model sees
+  // persistent failure patterns on the first request. Never changes mid-session.
+  restoreReady.then(() => {
+    refreshTopErrors(tracker);
+  });
 
   // Optional HTTP feed for the browser dashboard: same-origin GET returning
   // the live in-memory snapshot. Activation order is unconstrained, so the
@@ -613,8 +626,67 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           });
         },
       });
+      const disposeGuidanceGet = webServer.register({
+        kind: "exact",
+        path: "/plugin-api/tool-normalizer/guidance",
+        handler: (
+          req: { method?: string; on?: (event: string, cb: (chunk: string) => void) => void },
+          res: {
+            writeHead(status: number, headers: Record<string, string>): void;
+            end(body: string): void;
+          },
+        ) => {
+          if (req.method === "PUT") {
+            let body = "";
+            req.on?.("data", (chunk: string) => { body += chunk; });
+            req.on?.("end", () => {
+              try {
+                const parsed = JSON.parse(body) as { text?: string };
+                const prev = setGuidanceText(parsed.text ?? "");
+                res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+                res.end(JSON.stringify({ previous: prev, current: getGuidanceText() }));
+              } catch (e: unknown) {
+                res.writeHead(400, { "content-type": "text/plain" });
+                res.end(String(e));
+              }
+            });
+            return;
+          }
+          // Default: GET
+          res.writeHead(200, {
+            "content-type": "application/json; charset=utf-8",
+            "cache-control": "no-store",
+          });
+          res.end(JSON.stringify({
+            text: getGuidanceText(),
+            defaultText: DEFAULT_GUIDANCE_TEXT,
+          }));
+        },
+      });
+      const disposeGuidanceReset = webServer.register({
+        kind: "exact",
+        path: "/plugin-api/tool-normalizer/guidance/reset",
+        handler: (
+          req: { method?: string },
+          res: {
+            writeHead(status: number, headers?: Record<string, string>): void;
+            end(body?: string): void;
+          },
+        ) => {
+          if (req.method !== "POST") {
+            res.writeHead(405, { allow: "POST" });
+            res.end();
+            return;
+          }
+          resetGuidanceText();
+          res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+          res.end(JSON.stringify({ text: getGuidanceText() }));
+        },
+      });
       return () => {
         disposeReset?.();
+        disposeGuidanceGet?.();
+        disposeGuidanceReset?.();
         disposeStats?.();
       };
     }, "tool-normalizer: stats http routes");
@@ -776,6 +848,21 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           changes.push("按会话目录规范化编辑器路径/范围");
         }
         exec.arguments = normalized;
+      }
+
+      // 3. Normalize read/glob offset arguments (off-by-one fix)
+      if (
+        (exec.name === "read" || exec.name === "glob" || exec.name === "grep") &&
+        config.autoClampRanges
+      ) {
+        const normalized = normalizeReadArguments(exec.name, exec.arguments);
+        if (normalized !== undefined) {
+          wasHealed = true;
+          healCategory = "READ_ARGS";
+          normalizedPreview = compactPreview(JSON.stringify(normalized));
+          changes.push("修复 offset/start 参数（0→1 基准修正）");
+          exec.arguments = normalized;
+        }
       }
 
       // 4. Delegate to the downstream execution pipeline

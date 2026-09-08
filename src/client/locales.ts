@@ -52,6 +52,7 @@ export const zh = {
  catInnerDesc: "内层调用补全描述 (INNER_DESC)",
  catFsObserved: "文件观察后重试 (FS_OBSERVED)",
  catPassthrough: "正常直通 (PASSTHROUGH)",
+ catReadArgs: "读参数纠偏 (READ_ARGS)",
 
  // Table & Filters
  filterAll: "全部事件",
@@ -103,6 +104,20 @@ export const zh = {
  rule6Title: "失败即时提示 (Error Hints)",
  rule6Desc:
   "对无法恢复的错误，向结果追加一条可操作的恢复提示（PTC 直调改写示例、语法排障要点），原报错文本完整保留，模型当轮即可纠正。",
+
+ // Guidance Editor
+ guidanceTitle: "注入模型提示词（System Prompt Guidance）",
+ guidanceDesc: "每轮对话均注入以下指引，从源头减少 Tool Call 错误。修改后立即生效，无需重启。",
+ guidancePlaceholder: "输入提示词内容…",
+ guidanceLoadError: "无法加载提示词内容",
+ guidanceSaveSuccess: "提示词已更新",
+ guidanceSaveError: "保存失败",
+ guidanceResetConfirm: "确定恢复为默认提示词？",
+ guidanceResetSuccess: "已恢复默认提示词",
+ guidanceDefaultBtn: "恢复默认",
+ guidanceSaveBtn: "保存修改",
+ guidanceEmpty: "暂无提示词内容",
+ guidancePreviewTitle: "当前注入内容预览",
 
  statusEnabled: "已启用",
  statusActive: "生效中",

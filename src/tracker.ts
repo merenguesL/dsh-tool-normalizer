@@ -21,6 +21,7 @@ export type NormalizerCategory =
   | "RUN_CODE_SYNTAX"
   | "INNER_DESC"
   | "FS_OBSERVED"
+  | "READ_ARGS"
   | "PASSTHROUGH";
 
 export interface NormalizerRecord {

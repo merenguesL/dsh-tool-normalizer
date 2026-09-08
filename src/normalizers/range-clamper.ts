@@ -1,6 +1,9 @@
 /**
  * Normalizer for editor arguments and view ranges.
  *
+ * Also normalizes `offset`/start parameters for `read` and `glob` tools
+ * (off-by-one auto-fix: `offset: 0` → `offset: 1`).
+ *
  * @module dsh-tool-normalizer/normalizers/range-clamper
  */
 
@@ -58,4 +61,57 @@ export function normalizeEditorArguments(
   }
 
   return args
+}
+
+/**
+ * Tool names whose offset/limit/start parameters accept 1-based indices.
+ * The model often sends `offset: 0` instead of `offset: 1` — this normalizer
+ * clamps those values to the valid minimum.
+ */
+const OFFSET_TOOLS = new Set(['read', 'glob', 'grep'])
+
+/**
+ * Normalize `offset`, `limit`, and similar index parameters for read/glob/grep,
+ * clamping zero or negative values to the tool-required minimum of 1.
+ *
+ * @param toolName - The dispatched tool name.
+ * @param rawArgs - Raw arguments from the model.
+ * @returns A normalized copy of the arguments, or the original if unchanged.
+ */
+export function normalizeReadArguments(
+  toolName: string,
+  rawArgs: unknown,
+): Record<string, unknown> | undefined {
+  if (!rawArgs || typeof rawArgs !== 'object') return undefined
+  if (!OFFSET_TOOLS.has(toolName)) return undefined
+
+  const args = { ...(rawArgs as Record<string, unknown>) }
+  let changed = false
+
+  // Clamp offset / start: model frequently sends 0 instead of 1
+  const offsetKey = 'offset' in args ? 'offset' : 'start' in args ? 'start' : undefined
+  if (offsetKey !== undefined) {
+    const val = args[offsetKey]
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      const clamped = Math.max(1, Math.floor(val))
+      if (clamped !== val) {
+        args[offsetKey] = clamped
+        changed = true
+      }
+    }
+  }
+
+  // Clamp limit to minimum 1
+  if ('limit' in args) {
+    const val = args['limit']
+    if (typeof val === 'number' && Number.isFinite(val)) {
+      const clamped = Math.max(1, Math.floor(val))
+      if (clamped !== val) {
+        args['limit'] = clamped
+        changed = true
+      }
+    }
+  }
+
+  return changed ? args : undefined
 }

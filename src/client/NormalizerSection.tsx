@@ -161,6 +161,12 @@ export function NormalizerSection(
     new Set(),
   );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [guidanceText, setGuidanceTextLocal] = useState<string>("");
+  const [guidanceDefault, setGuidanceDefault] = useState<string>("");
+  const [guidanceLoading, setGuidanceLoading] = useState(false);
+  const [guidanceDirty, setGuidanceDirty] = useState(false);
+  const [guidanceSaving, setGuidanceSaving] = useState(false);
+  const [guidanceMsg, setGuidanceMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   useEffect(() => {
     if (!controller) return;
@@ -168,6 +174,15 @@ export function NormalizerSection(
       setState(controller.getSnapshot());
     });
     controller.refresh();
+    // Fetch guidance text for the editor
+    setGuidanceLoading(true);
+    controller?.fetchGuidance?.().then(() => {
+      const s = controller?.getGuidanceState?.();
+      if (s) {
+        if (s.text !== undefined && s.text !== null) setGuidanceTextLocal(s.text);
+        if (s.defaultText !== undefined && s.defaultText !== null) setGuidanceDefault(s.defaultText);
+      }
+    }).finally(() => setGuidanceLoading(false));
     // Keep relative timestamps and any adopted feed fresh while visible.
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") controller.refresh();
@@ -264,6 +279,8 @@ export function NormalizerSection(
         return t("catInnerDesc");
       case "FS_OBSERVED":
         return t("catFsObserved");
+      case "READ_ARGS":
+        return t("catReadArgs");
       case "PASSTHROUGH":
         return t("statusPassthrough");
       default:
@@ -825,21 +842,117 @@ export function NormalizerSection(
       )}
 
       {/* TAB: rules */}
+            {/* TAB: rules */}
       {state.activeTab === "rules" && (
-        <section className={styles.rulesGrid}>
-          {([1, 2, 3, 4, 5, 6] as const).map((n) => (
-            <article key={n} className={styles.ruleCard}>
-              <div className={styles.ruleHead}>
-                <h3 className={styles.ruleTitle}>
-                  {t(`rule${n}Title` as NormalizerKey)}
-                </h3>
-                <span className={styles.ruleTag}>✓ {t("statusActive")}</span>
+        <section>
+          <div className={styles.rulesGrid}>
+            {([1, 2, 3, 4, 5, 6] as const).map((n) => (
+              <article key={n} className={styles.ruleCard}>
+                <div className={styles.ruleHead}>
+                  <h3 className={styles.ruleTitle}>
+                    {t(`rule${n}Title` as NormalizerKey)}
+                  </h3>
+                  <span className={styles.ruleTag}>✓ {t("statusActive")}</span>
+                </div>
+                <p className={styles.ruleDesc}>
+                  {t(`rule${n}Desc` as NormalizerKey)}
+                </p>
+              </article>
+            ))}
+          </div>
+
+          <section className={styles.guidanceEditor}>
+            <header className={styles.guidanceEditorHeader}>
+              <div className={styles.guidanceEditorTitleGroup}>
+                <span className={styles.guidanceEditorIcon}>
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 1.5 16 5v5.5c0 3.3-2.7 5.9-7 7-4.3-1.1-7-3.7-7-7V5L9 1.5Z"/>
+                    <path d="M6.5 8.5 8 10l3-3.5"/>
+                  </svg>
+                </span>
+                <div>
+                  <h3 className={styles.guidanceEditorTitle}>{t("guidanceTitle")}</h3>
+                  <p className={styles.guidanceEditorDesc}>{t("guidanceDesc")}</p>
+                </div>
               </div>
-              <p className={styles.ruleDesc}>
-                {t(`rule${n}Desc` as NormalizerKey)}
-              </p>
-            </article>
-          ))}
+              <div className={styles.guidanceEditorActions}>
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  onClick={async () => {
+                    if (guidanceDefault && guidanceText !== guidanceDefault) {
+                      setGuidanceTextLocal(guidanceDefault);
+                      const ok = await controller?.resetGuidance?.();
+                      if (ok) {
+                        setGuidanceDirty(false);
+                        setGuidanceMsg({ type: "success", text: t("guidanceResetSuccess") });
+                        setTimeout(() => setGuidanceMsg(null), 2000);
+                      }
+                    }
+                  }}
+                  disabled={!guidanceDefault || guidanceText === guidanceDefault}
+                >
+                  ↺ {t("guidanceDefaultBtn")}
+                </button>
+                <button
+                  type="button"
+                  className={styles.guidanceEditorSaveBtn}
+                  onClick={async () => {
+                    setGuidanceSaving(true);
+                    const ok = await controller?.saveGuidance?.(guidanceText);
+                    setGuidanceSaving(false);
+                    if (ok) {
+                      setGuidanceDirty(false);
+                      setGuidanceMsg({ type: "success", text: t("guidanceSaveSuccess") });
+                      setTimeout(() => setGuidanceMsg(null), 2000);
+                    } else {
+                      setGuidanceMsg({ type: "error", text: t("guidanceSaveError") });
+                    }
+                  }}
+                  disabled={!guidanceDirty || guidanceSaving}
+                >
+                  {guidanceSaving ? "⟳ " : ""}{t("guidanceSaveBtn")}
+                </button>
+              </div>
+            </header>
+
+            {guidanceMsg && (
+              <div className={`${styles.guidanceEditorMsg} ${guidanceMsg.type === "error" ? styles.guidanceEditorMsgError : styles.guidanceEditorMsgOk}`}>
+                {guidanceMsg.text}
+              </div>
+            )}
+
+            {guidanceLoading ? (
+              <div className={styles.guidanceEditorLoading}>
+                {t("noData")}
+              </div>
+            ) : (
+              <div className={styles.guidanceEditorBody}>
+                <textarea
+                  className={styles.guidanceEditorTextarea}
+                  value={guidanceText}
+                  onChange={(e) => {
+                    setGuidanceTextLocal(e.target.value);
+                    setGuidanceDirty(true);
+                    setGuidanceMsg(null);
+                  }}
+                  placeholder={t("guidancePlaceholder")}
+                  rows={12}
+                  aria-label={t("guidanceTitle")}
+                />
+                <details className={styles.guidanceEditorPreview}>
+                  <summary className={styles.guidanceEditorPreviewSummary}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M6 2 2 8l4 6"/>
+                      <path d="M10 2 14 8l-4 6"/>
+                    </svg>
+                    {t("guidancePreviewTitle")}
+                  </summary>
+                  <pre className={styles.guidanceEditorPreviewCode}>{guidanceText || t("guidanceEmpty")}</pre>
+                </details>
+              </div>
+            )}
+          </section>
         </section>
       )}
     </div>

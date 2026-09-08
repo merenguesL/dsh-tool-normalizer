@@ -233,7 +233,92 @@ export class NormalizerStore {
     }
   };
 
-  private loadFromStorage(): NormalizerStats | null {
+  
+  /** Guidance text management */
+
+  /** Guidance text state for the editor UI. */
+  private guidanceText: string | null = null;
+  private guidanceDefault: string | null = null;
+  private guidanceLoading = true;
+
+  public getGuidanceState = (): {
+    text: string | null;
+    defaultText: string | null;
+    loading: boolean;
+  } => ({
+    text: this.guidanceText,
+    defaultText: this.guidanceDefault,
+    loading: this.guidanceLoading,
+  });
+
+  /** Fetch the current guidance text from the host. */
+  public fetchGuidance = async (): Promise<void> => {
+    if (typeof fetch !== "function") return;
+    this.guidanceLoading = true;
+    this.notify();
+    try {
+      const res = await fetch("/plugin-api/tool-normalizer/guidance", {
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          text: string;
+          defaultText: string;
+        };
+        this.guidanceText = data.text;
+        this.guidanceDefault = data.defaultText;
+      }
+    } catch {
+      // Endpoint unavailable
+    } finally {
+      this.guidanceLoading = false;
+      this.notify();
+    }
+  };
+
+  /** Save updated guidance text to the host. */
+  public saveGuidance = async (text: string): Promise<boolean> => {
+    if (typeof fetch !== "function") return false;
+    try {
+      const res = await fetch("/plugin-api/tool-normalizer/guidance", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { current: string };
+        this.guidanceText = data.current;
+        this.notify();
+        return true;
+      }
+    } catch {
+      // Endpoint unavailable
+    }
+    return false;
+  };
+
+  /** Reset guidance text to factory default. */
+  public resetGuidance = async (): Promise<boolean> => {
+    if (typeof fetch !== "function") return false;
+    try {
+      const res = await fetch("/plugin-api/tool-normalizer/guidance/reset", {
+        method: "POST",
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { text: string };
+        this.guidanceText = data.text;
+        this.notify();
+        return true;
+      }
+    } catch {
+      // Endpoint unavailable
+    }
+    return false;
+  };
+
+private loadFromStorage(): NormalizerStats | null {
     if (typeof localStorage === "undefined") return null;
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
