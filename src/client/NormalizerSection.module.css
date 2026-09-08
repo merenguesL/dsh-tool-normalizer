@@ -941,6 +941,8 @@
   padding: 0;
   border: none;
   background: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .guidanceEditorHeader {
@@ -950,6 +952,8 @@
   gap: 14px;
   flex-wrap: wrap;
   padding: 16px 18px;
+  width: 100%;
+  box-sizing: border-box;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 14px;
   background: var(--dsw-alias-bg-layer-2);
@@ -961,7 +965,7 @@
   align-items: flex-start;
   gap: 12px;
   min-width: 200px;
-  flex: 1 1 240px;
+  flex: 1 1 auto;
 }
 
 .guidanceEditorIcon {
@@ -1048,10 +1052,12 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
 }
 
 .guidanceEditorTextarea {
   width: 100%;
+  max-width: 100%;
   min-height: 220px;
   padding: 14px 16px;
   border: 1px solid var(--dsw-alias-border-l2);
@@ -1094,6 +1100,7 @@
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
   overflow: hidden;
+  width: 100%;
 }
 
 .guidanceEditorPreviewSummary {
@@ -1122,6 +1129,8 @@
 .guidanceEditorPreviewCode {
   margin: 0;
   padding: 14px 16px;
+  width: 100%;
+  box-sizing: border-box;
   font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
   font-size: 12px;
   line-height: 1.6;
@@ -1132,4 +1141,42 @@
   border-top: 1px solid var(--dsw-alias-border-l2);
   max-height: 320px;
   overflow-y: auto;
+}
+
+/* ---- Guidance Editor: Preview Rendering ---- */
+
+.guidancePreviewLine {
+  padding: 1px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guidancePreviewHeading {
+  padding: 2px 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary);
+  letter-spacing: -0.01em;
+}
+
+.guidancePreviewListItem {
+  padding: 1px 0;
+  padding-left: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.guidancePreviewListItem::before {
+  content: "•";
+  display: inline-block;
+  width: 12px;
+  margin-left: -12px;
+  color: var(--dsw-alias-label-tertiary);
 }

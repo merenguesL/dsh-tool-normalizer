@@ -844,7 +844,7 @@ export function NormalizerSection(
       {/* TAB: rules */}
             {/* TAB: rules */}
       {state.activeTab === "rules" && (
-        <section>
+        <section style={{ width: "100%" }}>
           <div className={styles.rulesGrid}>
             {([1, 2, 3, 4, 5, 6] as const).map((n) => (
               <article key={n} className={styles.ruleCard}>
@@ -948,7 +948,18 @@ export function NormalizerSection(
                     </svg>
                     {t("guidancePreviewTitle")}
                   </summary>
-                  <pre className={styles.guidanceEditorPreviewCode}>{guidanceText || t("guidanceEmpty")}</pre>
+                  <div className={styles.guidanceEditorPreviewCode}>{(guidanceText || t("guidanceEmpty")).split('\n').map((line, i) => {
+  // Simple markdown-like: detect headings, bold, etc.
+  let content = line;
+  let cls = "";
+  if (line.startsWith('## ')) {
+    cls = "guidancePreviewHeading";
+    content = line.slice(3);
+  } else if (line.startsWith('- ')) {
+    cls = "guidancePreviewListItem";
+  }
+  return <div key={i} className={styles[cls] || styles.guidancePreviewLine}>{content || "\u00A0"}</div>;
+})}</div>
                 </details>
               </div>
             )}
