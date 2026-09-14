@@ -150,6 +150,7 @@ function healMatchesError(
     case "CODE_WRAP":
     case "READ_ARGS":
       return (
+        errorCode === "INVALID_ARGS" ||
         /offset|start|limit/i.test(text)
       );
     case "INNER_DESC":
@@ -437,6 +438,22 @@ function getToolRuntime(ctx: any): any {
   return typeof ctx.get === "function" ? ctx.get("tools") : ctx.tools;
 }
 
+/**
+ * Language reported by the mounted code runtime, when one is present.
+ * The `run_code` body repairs are TypeScript-specific (they parse with
+ * `AsyncFunction` and splice JS object syntax), so Python programs must
+ * skip them: a triple-quoted Python string is valid Python, not a body to
+ * rewrite, and a JS-style `description:` splice would break Python dicts.
+ * Unknown/absent means the historical TypeScript behavior.
+ * @param ctx - Cordis Context.
+ * @returns The runtime language, or undefined when unavailable.
+ */
+function readCodeRuntimeLanguage(ctx: any): string | undefined {
+  const runtime =
+    typeof ctx.get === "function" ? ctx.get("codeRuntime") : ctx.codeRuntime;
+  return typeof runtime?.language === "string" ? runtime.language : undefined;
+}
+
 /** Shape of the optional session token-meter service read at dispatch time. */
 interface SessionTokenMeter {
   measure(
@@ -530,13 +547,13 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       );
     })
     .then(() => {
-      persistSnapshot(tracker.getSnapshot());
+      persistSnapshot(tracker.getAggregate());
     });
 
   /** Record one real event, append it to the durable log, and log a line. */
   const recordEvent = (record: Parameters<typeof tracker.record>[0]): void => {
     tracker.record(record);
-    appendEvent(record, tracker.getSnapshot(), {
+    appendEvent(record, tracker.getAggregate(), {
       persistPassthrough: config.persistPassthrough,
     });
     ctx.logger?.debug?.(
@@ -716,7 +733,17 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       // already-normalized arguments, so observing them would double-count one
       // user-facing call as several interceptions.
       if (isSelfNestedExec(exec)) return next();
-      const rawArgsStr = JSON.stringify(exec.arguments ?? {}) ?? "{}";
+      // Original arguments are captured by reference; serialization is lazy so
+      // healthy pass-through calls (the common case) pay zero stringify cost.
+      // The preview is diagnostic only — downstream mutation of arguments would
+      // only skew that preview, never the normalization decision (editor
+      // comparison stringifies before dispatch).
+      const originalArgs = exec.arguments;
+      let rawArgsStr: string | undefined;
+      const getRawArgsStr = (): string =>
+        (rawArgsStr ??= JSON.stringify(originalArgs ?? {}) ?? "{}");
+      const getOriginalPreview = (needed: boolean): string =>
+        needed ? compactPreview(getRawArgsStr()) : "";
       const startTime = Date.now();
       const eventId = `norm_${startTime}_${Math.random().toString(36).slice(2, 8)}`;
       const tools = getTools();
@@ -734,9 +761,14 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       let healCategory: NormalizerCategory = "PASSTHROUGH";
       let normalizedPreview: string | undefined;
       const changes: string[] = [];
+      // Body-level repairs parse as TypeScript; a Python runtime's program is
+      // not TS to fix (see readCodeRuntimeLanguage). Set inside the run_code
+      // branch, read by the error-hint path after dispatch.
+      let isPythonProgram = false;
 
       // 1. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
       if (exec.name === "run_code" && config.autoWrapRunCode) {
+        isPythonProgram = readCodeRuntimeLanguage(ctx) === "python";
         const originalObj = objectValue(exec.arguments);
         const normalized = normalizeRunCodeArguments(exec.arguments);
         // An empty program would succeed as a no-op and hide the model error;
@@ -778,10 +810,12 @@ export function apply(ctx: any, userConfig: Config = {}): void {
 
         // 2b. Preemptive inner-call repair: inject missing descriptions into the
         // program's tools.*() options objects before execution, but only for
-        // tools whose active schema declares description as required.
+        // tools whose active schema declares description as required. Skipped
+        // for Python programs: the splice emits JS object syntax, which is
+        // not valid inside a Python dict.
         const codeBody =
           typeof normalized.code === "string" ? normalized.code : undefined;
-        if (codeBody !== undefined) {
+        if (codeBody !== undefined && !isPythonProgram) {
           // One program can reference the same tool dozens of times; resolve
           // each distinct schema once per dispatch instead of per occurrence.
           const descriptionCache = new Map<string, boolean>();
@@ -812,8 +846,10 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         // it. Repair the three mechanical model-side breakage classes
         // (truncated tails, Python triple-quoted strings, stray template
         // backticks); every candidate is re-parsed before acceptance and
-        // valid programs are never touched.
-        if (typeof normalized.code === "string") {
+        // valid programs are never touched. TypeScript-only: under a Python
+        // runtime the "triple-quoted string" shape is valid source, and
+        // `AsyncFunction` parsing does not describe Python at all.
+        if (typeof normalized.code === "string" && !isPythonProgram) {
           const repaired = repairRunCodeSyntax(normalized.code);
           if (repaired !== undefined) {
             normalized.code = repaired;
@@ -841,7 +877,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           exec.arguments,
           sessionCwd(exec.agent),
         );
-        if (JSON.stringify(normalized) !== rawArgsStr) {
+        if (JSON.stringify(normalized) !== getRawArgsStr()) {
           wasHealed = true;
           healCategory = "RANGE_CLAMP";
           normalizedPreview = compactPreview(JSON.stringify(normalized));
@@ -888,7 +924,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
             toolName: exec.name,
             category: "UNKNOWN_TOOL",
             wasHealed: true,
-            originalArgsPreview: compactPreview(rawArgsStr),
+            originalArgsPreview: compactPreview(getRawArgsStr()),
             normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
             normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
             status: result.isError ? "failed" : "success",
@@ -990,6 +1026,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
             result = appendResultHint(result, collapsedCallHint(exec.name));
           } else if (
             exec.name === "run_code" &&
+            !isPythonProgram &&
             healCategory !== "RUN_CODE_SYNTAX" &&
             isSyntaxLikeRunFailure(
               errorCode(result.isError ? result.error : undefined),
@@ -1005,7 +1042,9 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           toolName: exec.name,
           category: healCategory,
           wasHealed,
-          originalArgsPreview: compactPreview(rawArgsStr),
+          originalArgsPreview: getOriginalPreview(
+            wasHealed || result.isError === true || config.persistPassthrough,
+          ),
           normalizedArgsPreview: normalizedPreview,
           normalizationSummary:
             changes.length > 0 ? changes.join("；") : undefined,

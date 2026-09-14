@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-09-14
+
+### Fixed
+
+- **统计分类补齐 `READ_ARGS`，不再丢事件**: `stats-log.ts` 的持久化分类集合遗漏该类别，`read`/`glob`/`grep` 的纠偏事件写入后重启即在恢复时被丢弃。分类集合现由 `tracker.ts` 的 `NORMALIZER_CATEGORIES` 单点派生，新增分类无法再与校验集合漂移。
+- **Python `run_code` 跳过 TypeScript 程序修复**: 挂载 Python code runtime 时，内层 description 补全（JS 对象语法拼接）与三类语法修复（`AsyncFunction` 解析）不再触碰 Python 程序体；JS 语法提示亦不再追加到 Python 失败上。参数级归一化（`command`/`description`/Markdown 围栏）不受影响。
+
+### Changed
+
+- **热路径降为健康调用零序列化**: 原参数序列化改为惰性，仅在编辑器比对或诊断记录真正需要时执行；`appendEvent` 改用不拷贝 1000 条记录环的计数快照；无 `tools.` 子串的程序跳过内层扫描。行为与统计口径不变。
+
 ## [0.4.1] - 2026-09-04
 
 ### Fixed

@@ -21,7 +21,9 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   isDiagnosticRecord,
+  NORMALIZER_CATEGORIES,
   ToolNormalizerTracker,
+  type NormalizerAggregate,
   type NormalizerRecord,
   type NormalizerStats,
 } from "./tracker.ts";
@@ -54,17 +56,9 @@ interface PersistedAggregate {
   byCategory: Record<string, number>;
 }
 
-const CATEGORIES = new Set<NormalizerRecord["category"]>([
-  "INVALID_ARGS",
-  "UNKNOWN_TOOL",
-  "RANGE_CLAMP",
-  "CODE_WRAP",
-  "RUN_CODE_DESC",
-  "RUN_CODE_SYNTAX",
-  "INNER_DESC",
-  "FS_OBSERVED",
-  "PASSTHROUGH",
-]);
+const CATEGORIES = new Set<NormalizerRecord["category"]>(
+  NORMALIZER_CATEGORIES,
+);
 
 const STATUSES = new Set<NormalizerRecord["status"]>([
   "success",
@@ -238,7 +232,7 @@ function aggregateFromRecords(
   };
 }
 
-function snapshotAggregate(stats: NormalizerStats): PersistedAggregate {
+function snapshotAggregate(stats: NormalizerAggregate): PersistedAggregate {
   return {
     version: SUMMARY_VERSION,
     updatedAt: Date.now(),
@@ -332,7 +326,7 @@ function flushPendingSummary(): void {
   if (summary !== undefined) enqueue(() => writeSummary(summary));
 }
 
-function scheduleSummary(stats: NormalizerStats, immediate: boolean): void {
+function scheduleSummary(stats: NormalizerAggregate, immediate: boolean): void {
   pendingSummary = snapshotAggregate(stats);
   if (immediate) {
     flushPendingSummary();
@@ -351,12 +345,12 @@ function scheduleSummary(stats: NormalizerStats, immediate: boolean): void {
  * Append one event and publish a compact aggregate snapshot. Successful
  * untouched calls are skipped from JSONL unless explicitly enabled.
  * @param record - Event emitted by the interceptor.
- * @param stats - Post-record aggregate snapshot.
+ * @param stats - Post-record aggregate counters.
  * @param options - Persistence policy for successful untouched calls.
  */
 export function appendEvent(
   record: NormalizerRecord,
-  stats: NormalizerStats,
+  stats: NormalizerAggregate,
   options: { persistPassthrough?: boolean } = {},
 ): void {
   if (isTestRun()) return;
@@ -374,8 +368,11 @@ export function appendEvent(
   scheduleSummary(stats, detailed);
 }
 
-/** Persist the current compact snapshot, normally after asynchronous replay. */
-export function persistSnapshot(stats: NormalizerStats): void {
+/**
+ * Persist the current compact snapshot, normally after asynchronous replay.
+ * @param stats - Post-record aggregate counters.
+ */
+export function persistSnapshot(stats: NormalizerAggregate): void {
   if (!isTestRun()) scheduleSummary(stats, true);
 }
 

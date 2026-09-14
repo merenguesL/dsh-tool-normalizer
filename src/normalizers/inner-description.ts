@@ -344,6 +344,8 @@ export function injectInnerDescriptions(
   outerDescription: string,
   requiresDescription: DescriptionRequirement = () => true,
 ): { code: string; injected: number } {
+  // Fast path for the common healthy case: no inner dispatch, no scan.
+  if (!code.includes("tools.")) return { code, injected: 0 };
   const out: string[] = [];
   let i = 0;
   let injected = 0;

@@ -49,7 +49,7 @@ const okNext = () =>
   });
 
 describe("hot-path budgets", () => {
-  it("serializes arguments once for a healthy run_code call", async () => {
+  it("serializes no arguments for a healthy run_code call", async () => {
     const tools = {
       get: vi.fn(() => ({
         name: "bash",
@@ -70,9 +70,9 @@ describe("hot-path budgets", () => {
     const stringify = vi.spyOn(JSON, "stringify");
     stringify.mockClear();
     await ctx.runWaterfall("tools/execute", exec, okNext());
-    // One serialization (the raw-args capture); the unchanged-arguments fast
-    // path must not stringify the normalized copy again.
-    expect(stringify).toHaveBeenCalledTimes(1);
+    // Zero serializations: the raw-args capture is lazy, so a healthy call
+    // with no normalization and no diagnostic record never stringifies.
+    expect(stringify).toHaveBeenCalledTimes(0);
     stringify.mockRestore();
     expect(tracker.getSnapshot().healedSuccess).toBe(0);
   });

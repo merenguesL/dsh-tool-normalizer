@@ -24,6 +24,23 @@ export type NormalizerCategory =
   | "READ_ARGS"
   | "PASSTHROUGH";
 
+/**
+ * Canonical category list. Persistence validation derives from this array so
+ * a new category cannot be recorded yet dropped on log replay.
+ */
+export const NORMALIZER_CATEGORIES: readonly NormalizerCategory[] = [
+  "INVALID_ARGS",
+  "UNKNOWN_TOOL",
+  "RANGE_CLAMP",
+  "CODE_WRAP",
+  "RUN_CODE_DESC",
+  "RUN_CODE_SYNTAX",
+  "INNER_DESC",
+  "FS_OBSERVED",
+  "READ_ARGS",
+  "PASSTHROUGH",
+] as const;
+
 export interface NormalizerRecord {
   id: string;
   time: number;
@@ -63,6 +80,22 @@ export interface NormalizerStats {
   byCategory: Record<string, number>;
   recentRecords: NormalizerRecord[];
 }
+
+/**
+ * Counter-only view used by the persistence path. It omits the bounded
+ * record ring so the per-dispatch hot path avoids copying up to 1000 entries.
+ */
+export type NormalizerAggregate = Pick<
+  NormalizerStats,
+  | "totalIntercepted"
+  | "healedSuccess"
+  | "healedFailed"
+  | "passThrough"
+  | "passThroughFailed"
+  | "estimatedTokensSaved"
+  | "byTool"
+  | "byCategory"
+>;
 
 /**
  * Whether an event is worth keeping in the detailed diagnostic trace.
@@ -182,14 +215,22 @@ export class ToolNormalizerTracker {
 
   /**
    * Retrieve the current aggregate statistics snapshot.
+   * @returns Full snapshot including the bounded record ring for dashboard transport.
    */
   public getSnapshot(): NormalizerStats {
-    const totalHealAttempts = this.healedSuccess + this.healedFailed;
-    const healingSuccessRate =
-      totalHealAttempts > 0
-        ? Math.round((this.healedSuccess / totalHealAttempts) * 1000) / 10
-        : 0;
+    return {
+      ...this.getAggregate(),
+      healingSuccessRate: this.healingRate(),
+      recentRecords: [...this.records],
+    };
+  }
 
+  /**
+   * Retrieve counter-only aggregates without copying the record ring.
+   * The persistence hot path uses this; dashboard transport uses getSnapshot.
+   * @returns Counter snapshot with fresh per-tool and per-category maps.
+   */
+  public getAggregate(): NormalizerAggregate {
     return {
       totalIntercepted: this.totalIntercepted,
       healedSuccess: this.healedSuccess,
@@ -197,11 +238,16 @@ export class ToolNormalizerTracker {
       passThrough: this.passThrough,
       passThroughFailed: this.passThroughFailed,
       estimatedTokensSaved: this.estimatedTokensSaved,
-      healingSuccessRate,
       byTool: { ...this.byTool },
       byCategory: { ...this.byCategory },
-      recentRecords: [...this.records],
     };
+  }
+
+  private healingRate(): number {
+    const totalHealAttempts = this.healedSuccess + this.healedFailed;
+    return totalHealAttempts > 0
+      ? Math.round((this.healedSuccess / totalHealAttempts) * 1000) / 10
+      : 0;
   }
 
   /**

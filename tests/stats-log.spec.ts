@@ -91,4 +91,31 @@ describe('stats-log persistence policy', () => {
     await clearLog()
     await flushStatsLog()
   })
+
+  it('round-trips READ_ARGS diagnostic records across restarts', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-tool-normalizer-'))
+    process.env['DSH_HOME'] = home
+    delete process.env['VITEST']
+    delete process.env['NODE_ENV']
+
+    const tracker = new ToolNormalizerTracker()
+    const event = record({
+      id: 'read-args-1',
+      toolName: 'read',
+      category: 'READ_ARGS',
+      wasHealed: true,
+      status: 'success',
+    })
+    tracker.record(event)
+    appendEvent(event, tracker.getSnapshot())
+    await flushStatsLog()
+
+    const revived = new ToolNormalizerTracker()
+    await restoreFromLog(revived)
+    expect(revived.getSnapshot()).toMatchObject({ healedSuccess: 1 })
+    expect(revived.getSnapshot().byCategory['READ_ARGS']).toBe(1)
+
+    await clearLog()
+    await flushStatsLog()
+  })
 })

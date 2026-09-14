@@ -262,6 +262,37 @@ describe("dsh-tool-normalizer plugin", () => {
     expect(tracker.getSnapshot().recentRecords).toHaveLength(0);
   });
 
+  it("leaves a Python run_code body alone instead of applying TypeScript repairs", async () => {
+    const ctx = createMockContext();
+    (ctx as any).codeRuntime = { language: "python" };
+    ctx.tools.get.mockReturnValue(undefined);
+    apply(ctx as any, { autoWrapRunCode: true });
+
+    // Triple-quoted strings are valid Python; the TypeScript syntax repair
+    // would rewrite them into a template literal, so it must not run here.
+    const code = "const doc = '''line1\nline2''';\nreturn doc;";
+    const exec = {
+      name: "run_code",
+      arguments: { code, description: "Render doc" },
+      callId: "python-1",
+      rootCallId: "python-1",
+      token: "tok",
+      signal: new AbortController().signal,
+    };
+    const next = vi
+      .fn()
+      .mockResolvedValue({
+        content: [{ type: "text", text: "OK" }],
+        isError: false,
+      });
+
+    await ctx.runWaterfall("tools/execute", exec, next);
+
+    expect((exec.arguments as { code: string }).code).toBe(code);
+    expect(tracker.getSnapshot().healedSuccess).toBe(0);
+    expect(tracker.getSnapshot().passThrough).toBe(1);
+  });
+
   it("normalizes editor path and view ranges", async () => {
     const ctx = createMockContext();
     ctx.tools.get.mockReturnValue({ name: "edit" });
