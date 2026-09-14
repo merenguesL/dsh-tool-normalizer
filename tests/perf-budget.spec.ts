@@ -10,11 +10,12 @@ beforeEach(() => {
 
 function createMockContext() {
   const listeners: Record<string, ((...args: any[]) => any)[]> = {};
-  return {
+  const ctx: any = {
     on(event: string, fn: (...args: any[]) => any) {
       if (!listeners[event]) listeners[event] = [];
       listeners[event].push(fn);
     },
+    listeners,
     async runWaterfall(event: string, exec: any, next: () => Promise<any>) {
       const handlers = listeners[event] || [];
       let index = 0;
@@ -25,9 +26,17 @@ function createMockContext() {
         }
         return next();
       };
-      return dispatch();
+      const result = await dispatch();
+      // Emulate the host pipeline: the settled outcome reaches
+      // `tools/result` observers before the caller continues.
+      for (const fn of listeners["tools/result"] || []) {
+        await fn(exec, result);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return result;
     },
   };
+  return ctx;
 }
 
 function healthyRunCodeExec(code: string) {

@@ -68,7 +68,7 @@ Counterfactual upper bound: without the 837 healed successes, the post window wo
 
 ## 🎯 What Problems `dsh-tool-normalizer` Solves
 
-`dsh-tool-normalizer` acts as a low-overhead, deterministic safety middleware on the `tools/execute` waterfall extension point, paired with an integrated Web UI diagnostics dashboard.
+`dsh-tool-normalizer` acts as a low-overhead, deterministic safety middleware: normalization and healing on the `tools/execute` waterfall, statistics in the `tools/result` observer off the dispatch hot path, paired with an integrated Web UI diagnostics dashboard.
 
 ```
        Model Tool Call
@@ -106,13 +106,13 @@ Counterfactual upper bound: without the 837 healed successes, the post window wo
 - 🩹 **Inner-Call Description Injection**:
   - Before a `run_code` program executes, inserts a generated description only into a `tools.*()` call whose active tool schema marks `description` as required. Open schemas such as `read`, `glob`, and `grep` are left unchanged.
 - 📐 **Editor Parameter & Bounds Normalization**:
-  - Corrects structural and inverted `view_range` values in `str_replace_editor`; when the real error reports a line count, it retries with that bound and preserves the `-1` end-of-file sentinel.
-  - Resolves relative file paths to absolute paths against the session working directory.
+  - Corrects structural and inverted `view_range` values in `str_replace_editor` and `edit`; when the real error reports a line count, it retries with that bound and preserves the `-1` end-of-file sentinel.
+  - Resolves relative file paths to absolute paths against the session working directory for `str_replace_editor` only, which rejects relative paths outright. The `edit`/`read`/`write` family resolves them against the session workspace itself, so the plugin leaves those paths untouched (see the `read`/`write` note below).
 - 🩹 **Observe-then-Retry Recovery**:
   - After `FS_NOT_OBSERVED` or `FS_STALE_VERSION`, the plugin reads the target and retries the mutation once through the host dispatcher; anchor failures (`FS_EDIT_NOT_FOUND`, `FS_AMBIGUOUS_EDIT`) are never retried blindly — a best-effort refresh updates the observed version so the next model retry is not additionally blocked. Normal calls do not pay for a speculative read.
 - 📈 **Projected Token Savings**:
   - Measures the input tokens each successful healing avoids from the host's token-meter: the session's one-request context pressure multiplied by the skipped model round-trips, shown in the dashboard. A composition without `@deepseek-ai/dsh-token-meter` reports zero instead of guessing.
-  - Live observability: every interception updates aggregate counters. Healing attempts and failures append detailed JSONL events to `~/.dsh/tool-normalizer-events.jsonl`; successful untouched pass-through calls are aggregated in `tool-normalizer-summary.json` by default instead of expanding the detail log.
+  - Live observability: every settled call updates aggregate counters in the `tools/result` observer, off the dispatch hot path — including pre-execute/guard denials the `tools/execute` wrapper never sees, counted honestly as untouched failures. Healing attempts and failures append detailed JSONL events to `~/.dsh/tool-normalizer-events.jsonl`; successful untouched pass-through calls are aggregated in `tool-normalizer-summary.json` by default instead of expanding the detail log. The detail log rotates above 2 MB (newest 1 MB retained); the summary coalesces to at most one write per second and debug lines are emitted only for failures and heals.
   - Diagnostic previews keep both the beginning and end of long arguments and include a bounded summary of the fields or dispatch path that changed.
   - The dashboard reads live data from the same-origin feed `GET /plugin-api/tool-normalizer/stats`, registered by the node half when a webserver is present.
 - 📊 **Web UI Execution & Diagnostics Dashboard**:
@@ -201,12 +201,12 @@ You can customize plugin behavior in your workspace's `cordis.patch.yml` or `cor
 | `autoWrapRunCode` | `boolean` | `true` | Auto-convert `command` -> `code`, supply missing descriptions, strip Markdown fences. |
 | `autoBridgeDirectTools` | `boolean` | `true` | Safely re-dispatch an `UNKNOWN_TOOL` result that reached `tools/execute`; host-level pre-dispatch denials cannot be intercepted by a plugin. |
 | `autoObserveFiles` | `boolean` | `true` | After `FS_NOT_OBSERVED`, read the target and retry one edit/write through the host dispatcher. |
-| `autoClampRanges` | `boolean` | `true` | Correct editor ranges and resolve relative paths against the session directory. |
-| `injectPrompt` | `boolean` | `true` | Dynamically register prompt guidelines with `ctx.systemPrompt`. Static text only — never breaks prefix caching. |
+| `autoClampRanges` | `boolean` | `true` | Correct editor ranges; resolve relative paths against the session directory for `str_replace_editor` only. |
+| `injectPrompt` | `boolean` | `true` | Register prompt guidelines with `ctx.systemPrompt`: instructional guidance as a section, top-error diagnostics as runtime context (section fallback on older hosts). Static text only — never breaks prefix caching. |
 | `errorHints` | `boolean` | `true` | Append one actionable hint to unrecoverable PTC/syntax errors while preserving the original error text. |
 | `persistPassthrough` | `boolean` | `false` | Persist successful untouched pass-through calls as detailed JSONL events; failures and healing attempts are always retained. |
 
-Healing success rate is `healedSuccess / (healedSuccess + healedFailed)` and excludes untouched pass-through failures. A pre-dispatch normalization whose final error belongs to a different failure class is attributed as an unrelated pass-through failure rather than a failed heal, so the rate measures real efficacy. Successful untouched calls are kept in aggregate counters and the compact `tool-normalizer-summary.json`, not one detail line per call.
+Healing success rate is `healedSuccess / (healedSuccess + healedFailed)` and excludes untouched pass-through failures — including pre-execute/guard denials, which are counted in the totals but never attributed to healing. A pre-dispatch normalization whose final error belongs to a different failure class is attributed as an unrelated pass-through failure rather than a failed heal, so the rate measures real efficacy. Successful untouched calls are kept in aggregate counters and the compact `tool-normalizer-summary.json`, not one detail line per call.
 
 The token-savings KPI sums measured per-heal input tokens: each successful heal credits `skipped model round-trips × token-meter request pressure`, i.e. the prompt a further request would have re-submitted. It requires `@deepseek-ai/dsh-token-meter` in the composition; without it the figure stays `0` instead of using a hardcoded per-retry constant.
 

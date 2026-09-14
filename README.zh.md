@@ -104,7 +104,7 @@
 - 💡 **失败即时提示**（`errorHints`，默认开启）：
   - 对无法恢复的 PTC 直调错误与不可修复的 `run_code` 解析失败，在保留原报错文本的前提下追加一条可操作提示，模型当轮即可纠正。设为 `false` 可保持宿主报错逐字节不变。
 - 📐 **编辑器参数与边界纠偏**：
-  - 自动将相对路径转换为当前会话工作目录下的绝对路径。
+  - 仅对 `str_replace_editor`（拒收相对路径）将相对路径转换为当前会话工作目录下的绝对路径；`edit`/`read`/`write` 族自己会解析，插件不碰。
   - 先做结构性范围修正；当 `str_replace_editor` 返回包含文件行数的越界错误时，按真实行数嵌套重试，并保留 `-1` 到文件末尾的语义。
 - 🩹 **文件观察后重试**：
   - 在编辑/写入返回 `FS_NOT_OBSERVED` 或 `FS_STALE_VERSION` 后读取目标文件，再通过宿主标准派发重试一次；锚点丢失类错误（`FS_EDIT_NOT_FOUND`、`FS_AMBIGUOUS_EDIT`）绝不盲目重试，仅预读刷新观察态以便模型下次重试不再被额外拦截；正常调用不会预先增加一次读取。
@@ -191,12 +191,12 @@ pnpm dsh web
 | `autoWrapRunCode` | `boolean` | `true` | 自动转换 `command` 属性为 `code`，自动补全描述，剥离 Markdown 标记 |
 | `autoBridgeDirectTools` | `boolean` | `true` | 仅对已进入 `tools/execute` 的 `UNKNOWN_TOOL` 结果尝试安全嵌套恢复；宿主提前拒绝的调用插件无法拦截 |
 | `autoObserveFiles` | `boolean` | `true` | 仅在收到 `FS_NOT_OBSERVED` 后读取目标并重试一次编辑/写入 |
-| `autoClampRanges` | `boolean` | `true` | 修正编辑器范围并将相对路径转为当前会话目录下的绝对路径 |
+| `autoClampRanges` | `boolean` | `true` | 修正编辑器范围；仅对 `str_replace_editor` 解析相对路径 |
 | `injectPrompt` | `boolean` | `true` | 动态向 `systemPrompt` 注册极简工具最佳实践提示词（静态文本，不影响前缀缓存命中） |
 | `errorHints` | `boolean` | `true` | 对不可恢复的 PTC/语法错误追加一条可操作提示，原报错文本完整保留 |
 | `persistPassthrough` | `boolean` | `false` | 是否将未修改且成功的正常放行调用逐条写入 JSONL；默认仅保留聚合计数，失败和自愈事件仍保留明细 |
 
-成功率只计算实际发生修复/恢复尝试的调用：`healedSuccess / (healedSuccess + healedFailed)`。前置规范化改对、但终错属于另一失败类别时，记为无关的未修复失败而非修复失败，成功率才反映真实修复能力。正常成功放行不会进入详细 JSONL，以避免日志被高频健康调用淹没；其计数写入同目录的 `tool-normalizer-summary.json`。
+成功率只计算实际发生修复/恢复尝试的调用：`healedSuccess / (healedSuccess + healedFailed)`。前置规范化改对、但终错属于另一失败类别时，记为无关的未修复失败而非修复失败，成功率才反映真实修复能力。预检/守卫拒绝等未修复失败计入总数但不进入成功率分母。正常成功放行不会进入详细 JSONL，以避免日志被高频健康调用淹没；其计数写入同目录的 `tool-normalizer-summary.json`（最多每秒落盘一次）。明细日志超 2 MB 自动轮转（保留最新约 1 MB），debug 日志仅记录失败与自愈。
 
 "预估节省 Token"KPI 为每次成功自愈累计的**实测**输入 token：每次修复记为「跳过的模型回环数 × token-meter 请求压力量」（即再多一次请求需重新提交的整段提示词）。它依赖组合中的 `@deepseek-ai/dsh-token-meter`；未挂载时该统计保持为 `0`，不再使用硬编码的单次重试成本。
 

@@ -10,7 +10,7 @@ beforeEach(() => {
 
 function createMockContext() {
   const listeners: Record<string, ((...args: any[]) => any)[]> = {};
-  return {
+  const ctx: any = {
     tools: {
       get: vi.fn(),
       execute: vi.fn(),
@@ -21,6 +21,16 @@ function createMockContext() {
     on(event: string, fn: (...args: any[]) => any) {
       if (!listeners[event]) listeners[event] = [];
       listeners[event].push(fn);
+    },
+    listeners,
+    // Emulate the host pipeline around the `tools/execute` waterfall: the
+    // settled outcome reaches `tools/result` observers, then microtasks
+    // flush (the plugin records behind history restore).
+    async fireResult(exec: any, result: any) {
+      for (const fn of listeners["tools/result"] || []) {
+        await fn(exec, result);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0));
     },
     async runWaterfall(event: string, exec: any, next: () => Promise<any>) {
       const handlers = listeners[event] || [];
@@ -33,9 +43,23 @@ function createMockContext() {
         }
         return next();
       };
-      return dispatch();
+      try {
+        const result = await dispatch();
+        await ctx.fireResult(exec, result);
+        return result;
+      } catch (error: unknown) {
+        // A throwing wrapper still settles: the host normalizes the throw
+        // into an error result before `tools/result` observers run.
+        await ctx.fireResult(exec, {
+          content: [{ type: "text", text: String(error) }],
+          isError: true,
+          error,
+        });
+        throw error;
+      }
     },
   };
+  return ctx;
 }
 
 describe("dsh-tool-normalizer plugin", () => {
@@ -295,13 +319,17 @@ describe("dsh-tool-normalizer plugin", () => {
 
   it("normalizes editor path and view ranges", async () => {
     const ctx = createMockContext();
-    ctx.tools.get.mockReturnValue({ name: "edit" });
+    ctx.tools.get.mockReturnValue({ name: "str_replace_editor" });
 
     apply(ctx as any, { autoClampRanges: true });
 
     const exec = {
-      name: "edit",
-      arguments: { path: "relative/file.ts", view_range: [-1, 20] },
+      name: "str_replace_editor",
+      arguments: {
+        command: "view",
+        path: "relative/file.ts",
+        view_range: [-1, 20],
+      },
       callId: "c2",
       rootCallId: "c2",
       token: "tok",
@@ -319,6 +347,37 @@ describe("dsh-tool-normalizer plugin", () => {
 
     expect(next).toHaveBeenCalled();
     expect((exec.arguments as any).path).toMatch(/^\//);
+    expect((exec.arguments as any).view_range).toEqual([1, 20]);
+  });
+
+  it("leaves edit relative paths to the host resolver and still clamps ranges", async () => {
+    const ctx = createMockContext();
+    ctx.tools.get.mockReturnValue({ name: "edit" });
+
+    apply(ctx as any, { autoClampRanges: true });
+
+    const exec = {
+      name: "edit",
+      arguments: { path: "relative/file.ts", view_range: [-1, 20] },
+      callId: "c2b",
+      rootCallId: "c2b",
+      token: "tok",
+      signal: new AbortController().signal,
+    };
+
+    const next = vi
+      .fn()
+      .mockResolvedValue({
+        content: [{ type: "text", text: "OK" }],
+        isError: false,
+      });
+
+    await ctx.runWaterfall("tools/execute", exec, next);
+
+    expect(next).toHaveBeenCalled();
+    // The edit family resolves relative paths against the session workspace
+    // itself; only the structurally invalid range is normalized here.
+    expect((exec.arguments as any).path).toBe("relative/file.ts");
     expect((exec.arguments as any).view_range).toEqual([1, 20]);
   });
 
@@ -367,15 +426,17 @@ describe("dsh-tool-normalizer plugin", () => {
     expect(result.isError).toBe(false);
     expect(next).toHaveBeenCalledOnce();
     expect(calls.map((call) => call.name)).toEqual(["read", "edit"]);
+    // Relative paths stay relative: the host tool resolves them against the
+    // session workspace at dispatch time.
     expect(calls[0]).toMatchObject({
-      arguments: { file_path: "/workspace/src/file.ts" },
+      arguments: { file_path: "src/file.ts" },
       rootCallId: "root-3",
       parent: token,
       agent,
     });
     expect(calls[1]).toMatchObject({
       arguments: {
-        file_path: "/workspace/src/file.ts",
+        file_path: "src/file.ts",
         old_string: "a",
         new_string: "b",
       },
@@ -716,5 +777,113 @@ describe("dsh-tool-normalizer plugin", () => {
     const result = await ctx.runWaterfall("tools/execute", exec, next);
 
     expect(result.content).toEqual([{ type: "text", text: "parse failed" }]);
+  });
+});
+
+describe("tools/result observation", () => {
+  beforeEach(() => {
+    tracker.reset();
+  });
+
+  it("counts a pre-execute denial the execute wrapper never sees", async () => {
+    const ctx = createMockContext();
+    apply(ctx as any, {});
+
+    await ctx.fireResult(
+      { name: "bash", callId: "denied-1", arguments: { command: "rm -rf /" } },
+      {
+        content: [{ type: "text", text: "denied" }],
+        isError: true,
+        error: { message: "denied by policy", info: { code: "DENIED" } },
+      },
+    );
+
+    const snapshot = tracker.getSnapshot();
+    expect(snapshot.totalIntercepted).toBe(1);
+    expect(snapshot.passThroughFailed).toBe(1);
+    expect(snapshot.healedSuccess).toBe(0);
+    const record = snapshot.recentRecords[0];
+    expect(record?.category).toBe("PASSTHROUGH");
+    expect(record?.wasHealed).toBe(false);
+    expect(record?.errorMessage).toBe("denied by policy");
+  });
+
+  it("does not double-count a call recorded inline by the fallback", async () => {
+    const listeners: Record<string, ((...args: any[]) => any)[]> = {};
+    // A host predating `tools/result`: the registration never fires.
+    const ctx: any = {
+      tools: { get: vi.fn(), execute: vi.fn() },
+      systemPrompt: { section: vi.fn() },
+      on(event: string, fn: (...args: any[]) => any) {
+        if (event === "tools/result") return;
+        if (!listeners[event]) listeners[event] = [];
+        listeners[event].push(fn);
+      },
+    };
+    vi.useFakeTimers();
+    try {
+      apply(ctx, {});
+      const handlers = listeners["tools/execute"] || [];
+      const exec = {
+        name: "bash",
+        arguments: { command: "echo hi" },
+        callId: "fallback-1",
+        rootCallId: "fallback-1",
+        token: "tok",
+        signal: new AbortController().signal,
+      };
+      const result = await (handlers[0] as any)(exec, async () => ({
+        content: [{ type: "text", text: "hi" }],
+        isError: false,
+      }));
+      expect(result.isError).toBe(false);
+      expect(tracker.getSnapshot().totalIntercepted).toBe(0);
+      // The 15s sweep reclaims the unobserved handoff and engages the
+      // fallback; later calls record inline with no backlog.
+      await vi.advanceTimersByTimeAsync(16000);
+      expect(tracker.getSnapshot().totalIntercepted).toBe(1);
+      expect(tracker.getSnapshot().passThrough).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("prompt guidance placement", () => {
+  it("registers top errors as runtime context when the host supports it", () => {
+    const ctx: any = {
+      tools: { get: vi.fn(), execute: vi.fn() },
+      systemPrompt: { section: vi.fn(), context: vi.fn() },
+      on: vi.fn(),
+      effect: (fn: () => unknown) => fn(),
+      get: (name: string) => (ctx as any)[name],
+    };
+    apply(ctx, { injectPrompt: true });
+
+    expect(ctx.systemPrompt.context).toHaveBeenCalledTimes(1);
+    expect(ctx.systemPrompt.context.mock.calls[0]![0]).toMatchObject({
+      order: 130,
+    });
+    const sectionNames = ctx.systemPrompt.section.mock.calls.map(
+      (call: unknown[]) => (call[0] as { name: string }).name,
+    );
+    expect(sectionNames).not.toContain("tool-normalizer:top-errors");
+    expect(sectionNames).toContain("tool-normalizer:guidance");
+  });
+
+  it("falls back to a prompt section on hosts without runtime context", () => {
+    const ctx: any = {
+      tools: { get: vi.fn(), execute: vi.fn() },
+      systemPrompt: { section: vi.fn() },
+      on: vi.fn(),
+      effect: (fn: () => unknown) => fn(),
+    };
+    apply(ctx, { injectPrompt: true });
+
+    const topErrors = ctx.systemPrompt.section.mock.calls.find(
+      (call: unknown[]) =>
+        (call[0] as { name: string }).name === "tool-normalizer:top-errors",
+    );
+    expect(topErrors?.[0]).toMatchObject({ order: 395 });
   });
 });

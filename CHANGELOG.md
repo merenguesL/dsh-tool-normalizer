@@ -3,6 +3,24 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-14
+
+### Added
+
+- **统计迁入 `tools/result` 观察者**: 归一化与自愈仍在 `tools/execute`（预检阶段禁止改写参数），计数与落盘改从冻结终局读取并移出分发热路径；预检/守卫拒绝等 wrapper 见不到的调用首次被诚实计入未修复失败。早于该事件的宿主经 15 秒回收自动降级为内联记录。
+- **Top-errors 改走运行时上下文**: 诊断类文本改用 `systemPrompt.context`（旧宿主回退到原 section 槽位）；指导文本仍为 section。
+- **明细日志轮转**: JSONL 超 2 MB 时保留最新约 1 MB，启动与每 128 次明细追加各检查一次。
+
+### Changed
+
+- **日志资源占用**: summary 全结局防抖至每秒至多一次落盘；debug 行仅记录失败与自愈；健康直通保持零序列化、零明细行。
+- **`edit` 相对路径交还宿主**: 宿主 `edit`/`read`/`write` 本就按会话工作目录解析，只有 `str_replace_editor` 拒收相对路径——路径解析仅保留给后者，跨远端执行世界不再错位，自愈率不再掺水。
+- **错误归因优先结构码**: 参数类自愈先认 `INVALID_ARGS` 结构码，再回退消息匹配。
+
+### Fixed
+
+- **Throw 路径记录崩溃**: 两个异常分支仍在读取惰性化前的 `rawArgsStr`（多为 `undefined`，进 `compactPreview` 必抛，恰好吞掉原始异常）；四个记录点现收敛为单一 stash 助手。
+
 ## [0.4.7] - 2026-09-14
 
 ### Fixed

@@ -15,10 +15,17 @@ import { isAbsolute, resolve } from 'node:path'
  * optional line count is used by a retry path after a real editor response
  * reports the file length; the pre-dispatch pass cannot know it safely.
  *
+ * Relative-path resolution applies only to `str_replace_editor`, which
+ * rejects relative paths outright. The `edit`/`read`/`write` family resolves
+ * relative paths against the session workspace itself, so rewriting them
+ * here would duplicate host logic with a host-local `resolve` that is wrong
+ * for remote execution worlds.
+ *
  * @param toolName - Name of the editor tool.
  * @param rawArgs - Raw arguments object from model.
  * @param cwd - Current working directory.
  * @param maxLines - Known file line count, when available.
+ * @param resolveRelativePaths - Resolve relative paths against `cwd` when true.
  * @returns Normalized arguments.
  */
 export function normalizeEditorArguments(
@@ -26,6 +33,7 @@ export function normalizeEditorArguments(
   rawArgs: unknown,
   cwd: string = process.cwd(),
   maxLines?: number,
+  resolveRelativePaths = true,
 ): Record<string, unknown> {
   if (!rawArgs || typeof rawArgs !== 'object') {
     return {}
@@ -36,7 +44,7 @@ export function normalizeEditorArguments(
   // Normalize path / file_path / TargetFile
   const pathKey = ['path', 'file_path', 'TargetFile']
     .find(key => typeof args[key] === 'string')
-  if (pathKey && typeof args[pathKey] === 'string') {
+  if (resolveRelativePaths && pathKey && typeof args[pathKey] === 'string') {
     const rawPath = args[pathKey].trim()
     if (rawPath && !isAbsolute(rawPath)) {
       args[pathKey] = resolve(cwd, rawPath)

@@ -29,7 +29,11 @@ import {
   restoreFromLog,
   statsLogPath,
 } from "./stats-log.ts";
-import { ToolNormalizerTracker, type NormalizerCategory } from "./tracker.ts";
+import {
+  isDiagnosticRecord,
+  ToolNormalizerTracker,
+  type NormalizerCategory,
+} from "./tracker.ts";
 import type {
   Config,
   ToolDispatchExecution,
@@ -556,10 +560,165 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     appendEvent(record, tracker.getAggregate(), {
       persistPassthrough: config.persistPassthrough,
     });
-    ctx.logger?.debug?.(
-      `[tool-normalizer] ${record.toolName} category=${record.category} healed=${record.wasHealed} status=${record.status}`,
-    );
+    // Successful untouched calls dominate traffic; they are counters only, so
+    // they skip the debug line. Every failure and every heal still logs.
+    if (isDiagnosticRecord(record) || config.persistPassthrough) {
+      ctx.logger?.debug?.(
+        `[tool-normalizer] ${record.toolName} category=${record.category} healed=${record.wasHealed} status=${record.status}`,
+      );
+    }
   };
+
+  /**
+   * Healing context the `tools/execute` wrapper hands to the `tools/result`
+   * observer. Result-derived fields (status, error text, measured savings)
+   * are computed at observe time from the frozen final outcome, so a later
+   * `tools/post-execute` policy cannot skew them. The wrapper-observed
+   * outcome travels alongside only for the no-`tools/result` fallback, which
+   * has nothing better to report.
+   */
+  interface PendingHeal {
+    id: string;
+    time: number;
+    toolName: string;
+    category: NormalizerCategory;
+    wasHealed: boolean;
+    originalArgsPreview: string;
+    normalizedArgsPreview?: string;
+    normalizationSummary?: string;
+    agent: unknown;
+  }
+
+  interface StashedOutcome {
+    status: "success" | "failed" | "passthrough";
+    errorMessage?: string;
+    tokensSaved: number;
+  }
+
+  /** One stashed handoff: healing context plus the wrapper-observed outcome. */
+  interface StashedHeal {
+    pending: PendingHeal;
+    outcome: StashedOutcome;
+  }
+
+  /** Bounded handoff from wrapper to observer, keyed by call id. */
+  const pendingHeals = new Map<string, StashedHeal>();
+  const MAX_PENDING_HEALS = 1000;
+  /** Call ids already recorded inline by the no-`tools/result` fallback. */
+  const inlineRecorded = new Set<string>();
+  const MAX_INLINE_RECORDED = 2000;
+  /** True once the `tools/result` observer has fired on a supporting host. */
+  let resultHookConfirmed = false;
+  /** True once the fallback concluded the host never emits `tools/result`. */
+  let resultFallback = false;
+  let fallbackTimer: ReturnType<typeof setInterval> | undefined;
+
+  function stopFallbackTimer(): void {
+    if (fallbackTimer !== undefined) {
+      clearInterval(fallbackTimer);
+      fallbackTimer = undefined;
+    }
+  }
+
+  /**
+   * Build the recordable event from healing context and one observed final
+   * result. Status, error text, and measured savings always describe the
+   * outcome the model actually received.
+   * @param pending - Healing context stashed by the wrapper.
+   * @param result - Final frozen outcome for this call.
+   * @returns The event to record.
+   */
+  function buildRecord(
+    pending: PendingHeal,
+    result: ToolExecutionResult,
+  ): Parameters<typeof tracker.record>[0] {
+    const ok = !result.isError;
+    return {
+      ...pending,
+      status: resultStatus(result, pending.wasHealed),
+      errorMessage: resultErrorText(result),
+      tokensSaved: pending.wasHealed && ok
+        ? measureTokensSaved(
+            readTokenMeter(ctx),
+            pending.agent,
+            avoidedRoundTrips(pending.category),
+          )
+        : 0,
+    };
+  }
+
+  function stashPending(
+    callId: string | undefined,
+    pending: PendingHeal,
+    outcome: StashedOutcome,
+  ): void {
+    if (callId === undefined || resultFallback) {
+      // Without an identity the observer cannot correlate; record inline.
+      recordInline(callId, pending, outcome);
+      return;
+    }
+    if (pendingHeals.size >= MAX_PENDING_HEALS && !resultHookConfirmed) {
+      sweepUnobservedHeals();
+      if (resultFallback) {
+        recordInline(callId, pending, outcome);
+        return;
+      }
+    }
+    if (pendingHeals.size >= MAX_PENDING_HEALS) {
+      const oldest = pendingHeals.keys().next();
+      if (!oldest.done) pendingHeals.delete(oldest.value);
+    }
+    pendingHeals.set(callId, { pending, outcome });
+    // Lazily watch for hosts that predate `tools/result`: the interval only
+    // exists while an unconfirmed handoff is outstanding.
+    if (!resultHookConfirmed && fallbackTimer === undefined) {
+      fallbackTimer = setInterval(sweepUnobservedHeals, 15000);
+      fallbackTimer.unref?.();
+    }
+  }
+
+  /**
+   * Record one stashed heal inline. Used only when the host never emits
+   * `tools/result` (fallback) or the call carries no correlatable identity.
+   * @param callId - Call identity, when one exists.
+   * @param pending - Healing context stashed by the wrapper.
+   * @param outcome - Wrapper-observed outcome for this call.
+   */
+  function recordInline(
+    callId: string | undefined,
+    pending: PendingHeal,
+    outcome: StashedOutcome,
+  ): void {
+    if (callId !== undefined) {
+      if (inlineRecorded.size >= MAX_INLINE_RECORDED) {
+        const oldest = inlineRecorded.values().next();
+        if (!oldest.done) inlineRecorded.delete(oldest.value);
+      }
+      inlineRecorded.add(callId);
+    }
+    recordEvent({ ...pending, ...outcome });
+  }
+
+  /**
+   * Fallback sweep for hosts that predate `tools/result`: record whatever the
+   * observer never consumed with the wrapper-observed outcomes, then record
+   * inline from then on. Stops its own interval once the observer confirms
+   * or the backlog drains.
+   */
+  function sweepUnobservedHeals(): void {
+    if (resultHookConfirmed) {
+      stopFallbackTimer();
+      return;
+    }
+    if (pendingHeals.size === 0) return;
+    resultFallback = true;
+    const backlog = [...pendingHeals.values()];
+    pendingHeals.clear();
+    stopFallbackTimer();
+    for (const { pending, outcome } of backlog) {
+      recordInline(undefined, pending, outcome);
+    }
+  }
   ctx.logger?.info?.(
     `[tool-normalizer] active — intercepting tools/execute; history log: ${statsLogPath()}`,
   );
@@ -582,6 +741,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     ctx.effect(
       () => () => {
         routesStopped = true;
+        stopFallbackTimer();
         if (routeTimer !== undefined) clearTimeout(routeTimer);
         void flushStatsLog();
       },
@@ -766,6 +926,26 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       // branch, read by the error-hint path after dispatch.
       let isPythonProgram = false;
 
+      /**
+       * Snapshot the current healing locals into observer-handoff shape. The
+       * preview serializes lazily and only when the caller confirms the
+       * record will be diagnostic.
+       * @param previewNeeded - Whether the original-args preview is required.
+       * @returns Healing context for `stashPending`.
+       */
+      const currentPending = (previewNeeded: boolean): PendingHeal => ({
+        id: eventId,
+        time: startTime,
+        toolName: exec.name,
+        category: healCategory,
+        wasHealed,
+        originalArgsPreview: getOriginalPreview(previewNeeded),
+        normalizedArgsPreview: normalizedPreview,
+        normalizationSummary:
+          changes.length > 0 ? changes.join("；") : undefined,
+        agent: exec.agent,
+      });
+
       // 1. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
       if (exec.name === "run_code" && config.autoWrapRunCode) {
         isPythonProgram = readCodeRuntimeLanguage(ctx) === "python";
@@ -867,7 +1047,10 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         }
       }
 
-      // 2. Normalize editor arguments (relative paths, view ranges)
+      // 2. Normalize editor arguments (relative paths, view ranges).
+      // Relative-to-absolute resolution runs only for str_replace_editor,
+      // which rejects relative paths; the edit family resolves them against
+      // the session workspace itself.
       if (
         (exec.name === "edit" || exec.name === "str_replace_editor") &&
         config.autoClampRanges
@@ -876,12 +1059,14 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           exec.name,
           exec.arguments,
           sessionCwd(exec.agent),
+          undefined,
+          exec.name === "str_replace_editor",
         );
         if (JSON.stringify(normalized) !== getRawArgsStr()) {
           wasHealed = true;
           healCategory = "RANGE_CLAMP";
           normalizedPreview = compactPreview(JSON.stringify(normalized));
-          changes.push("按会话目录规范化编辑器路径/范围");
+          changes.push("规范化编辑器路径/范围");
         }
         exec.arguments = normalized;
       }
@@ -918,19 +1103,24 @@ export function apply(ctx: any, userConfig: Config = {}): void {
           isBridgeableDirectCall(exec, tools)
         ) {
           result = await executeBridgeDirectCall(exec, tools);
-          recordEvent({
-            id: eventId,
-            time: startTime,
-            toolName: exec.name,
-            category: "UNKNOWN_TOOL",
-            wasHealed: true,
-            originalArgsPreview: compactPreview(getRawArgsStr()),
-            normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
-            normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
-            status: result.isError ? "failed" : "success",
-            errorMessage: resultErrorText(result),
-            tokensSaved: savedTokens(true, !result.isError, "UNKNOWN_TOOL"),
-          });
+          // Recording happens in the `tools/result` observer from the frozen
+          // final outcome; the stash below carries the wrapper-observed
+          // outcome only for hosts predating that event.
+          stashPending(
+            exec.callId,
+            {
+              ...currentPending(true),
+              category: "UNKNOWN_TOOL",
+              wasHealed: true,
+              normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
+              normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
+            },
+            {
+              status: result.isError ? "failed" : "success",
+              errorMessage: resultErrorText(result),
+              tokensSaved: savedTokens(true, !result.isError, "UNKNOWN_TOOL"),
+            },
+          );
           return result;
         }
 
@@ -1036,22 +1226,17 @@ export function apply(ctx: any, userConfig: Config = {}): void {
             result = appendResultHint(result, SYNTAX_HINT);
           }
         }
-        recordEvent({
-          id: eventId,
-          time: startTime,
-          toolName: exec.name,
-          category: healCategory,
-          wasHealed,
-          originalArgsPreview: getOriginalPreview(
+        stashPending(
+          exec.callId,
+          currentPending(
             wasHealed || result.isError === true || config.persistPassthrough,
           ),
-          normalizedArgsPreview: normalizedPreview,
-          normalizationSummary:
-            changes.length > 0 ? changes.join("；") : undefined,
-          status: resultStatus(result, wasHealed),
-          errorMessage: resultErrorText(result),
-          tokensSaved: savedTokens(wasHealed, !result.isError, healCategory),
-        });
+          {
+            status: resultStatus(result, wasHealed),
+            errorMessage: resultErrorText(result),
+            tokensSaved: savedTokens(wasHealed, !result.isError, healCategory),
+          },
+        );
         return result;
       } catch (error: unknown) {
         // If a legacy host throws UNKNOWN_TOOL after entering the waterfall,
@@ -1067,41 +1252,111 @@ export function apply(ctx: any, userConfig: Config = {}): void {
             exec,
             currentTools,
           );
-          recordEvent({
-            id: eventId,
-            time: startTime,
-            toolName: exec.name,
-            category: "UNKNOWN_TOOL",
-            wasHealed: true,
-            originalArgsPreview: compactPreview(rawArgsStr),
-            normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
-            normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
-            status: bridgedResult.isError ? "failed" : "success",
-            errorMessage: resultErrorText(bridgedResult),
-            tokensSaved: savedTokens(
-              true,
-              !bridgedResult.isError,
-              "UNKNOWN_TOOL",
-            ),
-          });
+          stashPending(
+            exec.callId,
+            {
+              ...currentPending(true),
+              category: "UNKNOWN_TOOL",
+              wasHealed: true,
+              normalizedArgsPreview: `Nested dispatch: ${exec.name}`,
+              normalizationSummary: `通过宿主嵌套派发恢复 ${exec.name}，保留 agent、会话和取消上下文`,
+            },
+            {
+              status: bridgedResult.isError ? "failed" : "success",
+              errorMessage: resultErrorText(bridgedResult),
+              tokensSaved: savedTokens(
+                true,
+                !bridgedResult.isError,
+                "UNKNOWN_TOOL",
+              ),
+            },
+          );
           return bridgedResult;
         }
 
-        recordEvent({
-          id: eventId,
-          time: startTime,
-          toolName: exec.name,
-          category: healCategory,
-          wasHealed,
-          originalArgsPreview: compactPreview(rawArgsStr),
-          normalizedArgsPreview: normalizedPreview,
-          normalizationSummary:
-            changes.length > 0 ? changes.join("；") : undefined,
+        stashPending(exec.callId, currentPending(true), {
           status: "failed",
           errorMessage: errorText(error) ?? String(error),
+          tokensSaved: 0,
         });
         throw error;
       }
+    },
+  );
+
+  // Observe the frozen final outcome off the dispatch hot path. This covers
+  // every settled call — including pre-execute/guard denials the `execute`
+  // wrapper never sees — while the wrapper keeps owning normalization and
+  // healing. The host contains observer failures; this one still never
+  // throws so it cannot spam the host warning log.
+  ctx.on(
+    "tools/result",
+    (
+      exec: Pick<ToolDispatchExecution, "name" | "callId" | "arguments">,
+      result: ToolExecutionResult,
+    ): undefined => {
+      try {
+        if (
+          typeof exec.callId === "string" &&
+          exec.callId.includes(":normalizer:")
+        ) {
+          return undefined;
+        }
+        // Synchronous correlation: the event firing at all proves host
+        // support, so confirm before any async recording below. Only the
+        // tracker/file writes defer behind history restore.
+        resultHookConfirmed = true;
+        const callId = exec.callId;
+        const stashed = typeof callId === "string"
+          ? pendingHeals.get(callId)
+          : undefined;
+        if (stashed !== undefined && typeof callId === "string") {
+          pendingHeals.delete(callId);
+        }
+        const alreadyInline = stashed === undefined &&
+          typeof callId === "string" &&
+          inlineRecorded.delete(callId);
+        if (pendingHeals.size === 0) stopFallbackTimer();
+        void restoreReady.then(() => {
+          try {
+            if (stashed !== undefined) {
+              recordEvent(buildRecord(stashed.pending, result));
+              return;
+            }
+            if (alreadyInline) return;
+            // A settled call the wrapper never saw: a pre-execute or guard
+            // denial. Count it honestly as an untouched failure or pass.
+            const failed = result.isError === true;
+            let originalArgsPreview = "";
+            if (failed || config.persistPassthrough) {
+              try {
+                originalArgsPreview = compactPreview(
+                  JSON.stringify(
+                    (exec as { arguments?: unknown }).arguments ?? {},
+                  ) ?? "{}",
+                );
+              } catch {
+                // Preview is diagnostic; an unserializable snapshot stays empty.
+              }
+            }
+            recordEvent({
+              id: `norm_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              time: Date.now(),
+              toolName: exec.name,
+              category: "PASSTHROUGH",
+              wasHealed: false,
+              originalArgsPreview,
+              status: failed ? "failed" : "passthrough",
+              errorMessage: resultErrorText(result),
+            });
+          } catch {
+            // Recording is diagnostic only; never disturb the settled call.
+          }
+        });
+      } catch {
+        // Recording is diagnostic only; never disturb the settled call.
+      }
+      return undefined;
     },
   );
 }

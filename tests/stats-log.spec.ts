@@ -1,10 +1,11 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   appendEvent,
   clearLog,
+  compactLogIfOversized,
   flushStatsLog,
   restoreFromLog,
   statsLogPath,
@@ -114,6 +115,32 @@ describe('stats-log persistence policy', () => {
     await restoreFromLog(revived)
     expect(revived.getSnapshot()).toMatchObject({ healedSuccess: 1 })
     expect(revived.getSnapshot().byCategory['READ_ARGS']).toBe(1)
+
+    await clearLog()
+    await flushStatsLog()
+  })
+
+  it('compacts an oversized detail log to its newest valid slice', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-tool-normalizer-'))
+    process.env['DSH_HOME'] = home
+    delete process.env['VITEST']
+    delete process.env['NODE_ENV']
+
+    const line = (id: string): string =>
+      `${JSON.stringify(record({ id, toolName: 'bash', category: 'PASSTHROUGH', wasHealed: false, status: 'failed', errorMessage: `boom-${'x'.repeat(240)}` }))}\n`
+    const lines: string[] = ['not json\n', '{"id":1}\n']
+    for (let i = 0; i < 9000; i++) lines.push(line(`event-${i}`))
+    lines.push('{"torn": ')
+    await writeFile(statsLogPath(), lines.join(''), 'utf8')
+    expect((await stat(statsLogPath())).size).toBeGreaterThan(2 * 1024 * 1024)
+
+    await compactLogIfOversized()
+
+    const size = (await stat(statsLogPath())).size
+    expect(size).toBeLessThanOrEqual(1024 * 1024 + 512)
+    const kept = (await readFile(statsLogPath(), 'utf8')).trim().split('\n')
+    expect(JSON.parse(kept[0]!).id).not.toBe('event-0')
+    expect(JSON.parse(kept[kept.length - 1]!).id).toBe('event-8999')
 
     await clearLog()
     await flushStatsLog()

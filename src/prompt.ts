@@ -1,14 +1,24 @@
 /**
  * System prompt contribution for tool call invariants and best practices.
  *
- * Two sections are registered:
- *   1. Guidance text  (order 400) — mutable via dashboard, KV-cache-stable within session
- *   2. Top errors      (order 395) — snapshotted once at session start, never changes mid-session
+ * Two contributions are registered:
+ *   1. Guidance text  (section, order 400) — mutable via dashboard, KV-cache-stable within session
+ *   2. Top errors      (runtime context) — snapshotted once at session start, never changes mid-session
  *
- * Both use function-backed `text` so every prompt assemble reads the latest value,
- * but because the underlying data only changes on explicit user action (guidance edit)
- * or session boundary (top-errors snapshot), the rendered text is stable across
- * consecutive model requests — preserving the LLM's KV prefix cache.
+ * Guidance is instructional system text. Top errors are observational
+ * diagnostics, so they ride the cache-safe dynamic-context channel (a
+ * durable user-role snapshot logged only when changed) instead of the
+ * system prefix. Both use function-backed `text` so every prompt assemble
+ * reads the latest value, but because the underlying data only changes on
+ * explicit user action (guidance edit) or session boundary (top-errors
+ * snapshot), the rendered text is stable across consecutive model requests
+ * — preserving the LLM's KV prefix cache.
+ *
+ * The central section/context order tables are closed to third-party names
+ * (an unknown name resolves to `undefined` and fails registration), so both
+ * orders below are literals in documented gaps: guidance sits between the
+ * deployment prefix (0) and plan policy (500); top errors sits above the
+ * central context allocations (110/115/120).
  *
  * @module dsh-tool-normalizer/prompt
  */
@@ -64,11 +74,17 @@ export function getTopErrorsText(): string {
 /**
  * Refresh the top-errors snapshot from the tracker. Called at session start
  * and optionally on explicit user request. Never called mid-turn.
+ * @param tracker - Aggregate source exposing the counter snapshot.
  */
 export function refreshTopErrors(tracker: {
-  getSnapshot(): { byTool: Record<string, number>; byCategory: Record<string, number>; passThroughFailed: number; totalIntercepted: number }
+  getAggregate(): {
+    byTool: Record<string, number>;
+    byCategory: Record<string, number>;
+    passThroughFailed: number;
+    totalIntercepted: number;
+  }
 }): void {
-  const stats = tracker.getSnapshot()
+  const stats = tracker.getAggregate()
   if (stats.totalIntercepted === 0) {
     currentTopErrorsText = ''
     return
@@ -107,22 +123,40 @@ export function refreshTopErrors(tracker: {
 }
 
 /**
- * Register both guidance sections. Both use function-backed `text` for
- * runtime mutability, but their underlying data only changes on explicit
- * user action or session boundary, preserving KV cache stability.
+ * Register guidance as a prompt section and top errors as runtime context.
+ * Hosts predating `systemPrompt.context` keep the previous section slot, so
+ * one registration path covers every host version. Both use function-backed
+ * `text` for runtime mutability, but their underlying data only changes on
+ * explicit user action or session boundary, preserving KV cache stability.
+ * @param ctx - Cordis Context.
  */
 export function registerPromptGuidance(ctx: any): void {
   const systemPrompt = typeof ctx.get === 'function' ? ctx.get('systemPrompt') : ctx.systemPrompt
   if (!systemPrompt || typeof systemPrompt.section !== 'function') return
 
-  // Top-errors section: order 395 (just before main guidance)
-  // Snapshotted once; never changes mid-session
+  // Top-errors diagnostics: runtime context when available (order 130 sits
+  // above the central 110/115/120 allocations), section fallback otherwise.
+  const topErrorsText = () => getTopErrorsText()
   if (typeof ctx.effect === 'function') {
-    ctx.effect(() => systemPrompt.section({
+    if (typeof systemPrompt.context === 'function') {
+      ctx.effect(() => systemPrompt.context({
+        name: TOOL_NORMALIZER_TOP_ERRORS_SECTION,
+        order: 130,
+        text: topErrorsText,
+      }), 'tool-normalizer: top-errors')
+    } else {
+      ctx.effect(() => systemPrompt.section({
+        name: TOOL_NORMALIZER_TOP_ERRORS_SECTION,
+        order: 395,
+        text: topErrorsText,
+      }), 'tool-normalizer: top-errors')
+    }
+  } else if (typeof systemPrompt.context === 'function') {
+    systemPrompt.context({
       name: TOOL_NORMALIZER_TOP_ERRORS_SECTION,
-      order: 395,
-      text: () => getTopErrorsText(),
-    }), 'tool-normalizer: top-errors')
+      order: 130,
+      text: topErrorsText,
+    })
   }
 
   // Main guidance section: order 400

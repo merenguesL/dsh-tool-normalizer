@@ -14,6 +14,7 @@ import {
   mkdir,
   readFile,
   rename,
+  stat,
   unlink,
   writeFile,
 } from "node:fs/promises";
@@ -30,6 +31,11 @@ import {
 
 const SUMMARY_VERSION = 1;
 const SUMMARY_FLUSH_DELAY_MS = 1000;
+/** Detail log rotates above this size; the newest slice below is retained. */
+const LOG_SIZE_CAP_BYTES = 2 * 1024 * 1024;
+const LOG_COMPACT_KEEP_BYTES = 1024 * 1024;
+/** Runtime size checks run this often (detail appends); boot always checks. */
+const LOG_SIZE_CHECK_EVERY_APPENDS = 128;
 
 /** Event log lives under the DSH home directory (default ~/.dsh). */
 export function statsLogPath(): string {
@@ -267,6 +273,11 @@ export async function restoreFromLog(
 ): Promise<void> {
   if (isTestRun()) return;
 
+  try {
+    await compactLogIfOversized();
+  } catch {
+    // Rotation is diagnostic housekeeping; replay proceeds regardless.
+  }
   const [rawEvents, rawSummary] = await Promise.all([
     readOptional(statsLogPath()),
     readOptional(statsSummaryPath()),
@@ -326,12 +337,8 @@ function flushPendingSummary(): void {
   if (summary !== undefined) enqueue(() => writeSummary(summary));
 }
 
-function scheduleSummary(stats: NormalizerAggregate, immediate: boolean): void {
+function scheduleSummary(stats: NormalizerAggregate): void {
   pendingSummary = snapshotAggregate(stats);
-  if (immediate) {
-    flushPendingSummary();
-    return;
-  }
   if (summaryTimer !== undefined) return;
   const generation = writeGeneration;
   summaryTimer = setTimeout(() => {
@@ -340,6 +347,54 @@ function scheduleSummary(stats: NormalizerAggregate, immediate: boolean): void {
   }, SUMMARY_FLUSH_DELAY_MS);
   summaryTimer.unref?.();
 }
+
+/**
+ * Compact the detail log to its newest slice when it outgrows the cap.
+ * Rotation keeps valid newest-first records within budget and drops the
+ * torn tail, so an unbounded failure storm cannot grow the file forever.
+ * Boot and periodic runtime checks share this; no-op under the cap.
+ */
+export async function compactLogIfOversized(): Promise<void> {
+  if (isTestRun()) return;
+  let size: number;
+  try {
+    size = (await stat(statsLogPath())).size;
+  } catch {
+    // Missing history compacts to nothing to do.
+    return;
+  }
+  if (size <= LOG_SIZE_CAP_BYTES) return;
+  const raw = await readOptional(statsLogPath());
+  if (raw === undefined) return;
+  const kept: string[] = [];
+  let budget = LOG_COMPACT_KEEP_BYTES;
+  const lines = raw.split("\n");
+  for (let i = lines.length - 1; i >= 0 && budget > 0; i--) {
+    const line = lines[i]!;
+    if (!line.trim()) continue;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (!validRecord(parsed)) continue;
+    } catch {
+      // A torn or invalid line never survives rotation.
+      continue;
+    }
+    budget -= line.length + 1;
+    kept.push(line);
+  }
+  kept.reverse();
+  const path = statsLogPath();
+  const temporaryPath = `${path}.tmp`;
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(
+    temporaryPath,
+    kept.length > 0 ? `${kept.join("\n")}\n` : "",
+    "utf-8",
+  );
+  await rename(temporaryPath, path);
+}
+
+let detailedAppends = 0;
 
 /**
  * Append one event and publish a compact aggregate snapshot. Successful
@@ -362,18 +417,23 @@ export function appendEvent(
       await mkdir(dirname(statsLogPath()), { recursive: true });
       await appendFile(statsLogPath(), line, "utf-8");
     });
+    if (++detailedAppends % LOG_SIZE_CHECK_EVERY_APPENDS === 0) {
+      enqueue(() => compactLogIfOversized());
+    }
   }
-  // Failures/healing events are flushed promptly; normal pass-through counts
-  // are coalesced for one second to avoid a write per successful call.
-  scheduleSummary(stats, detailed);
+  // Every outcome coalesces into one debounced summary write per second: the
+  // JSONL holds the durable per-event detail, while the summary is only
+  // counters a crash window may legitimately lag by. Orderly teardown flushes.
+  scheduleSummary(stats);
 }
 
 /**
  * Persist the current compact snapshot, normally after asynchronous replay.
+ * Debounced like every other summary write; teardown flushes the tail.
  * @param stats - Post-record aggregate counters.
  */
 export function persistSnapshot(stats: NormalizerAggregate): void {
-  if (!isTestRun()) scheduleSummary(stats, true);
+  if (!isTestRun()) scheduleSummary(stats);
 }
 
 /** Wait for queued diagnostic writes; useful during orderly plugin teardown. */
