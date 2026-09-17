@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { validateCssModule } from './css-guard.mjs'
 
 const packageRoot = resolve(import.meta.dirname, '..')
 const packageName = 'dsh-tool-normalizer'
@@ -41,6 +42,8 @@ async function inlineCssModulePlugin() {
     setup(buildApi) {
       buildApi.onLoad({ filter: /\.module\.css$/ }, async (args) => {
         const cssContent = await readFile(args.path, 'utf-8')
+        // Fail the build rather than let the browser discard these rules silently.
+        validateCssModule(cssContent, args.path)
         // Match only class selectors: .className (not decimals like 0.04 or 1.5rem)
         const classNames = {}
         const matches = cssContent.match(/(?<=(?:^|[^\w.-]))\.([a-zA-Z][a-zA-Z0-9_-]*)/g) || []

@@ -72,6 +72,7 @@ export const zh = {
  // Diff View
  beforeInput: "原始输入预览 (Before)",
  afterInput: "修复后输入预览 (After)",
+ afterUnchanged: "（未做修改）",
  changeSummary: "实际变更",
  diffDetails: "查看参数差异",
  hideDetails: "收起参数差异",
@@ -118,6 +119,9 @@ export const zh = {
  guidanceSaveBtn: "保存修改",
  guidanceEmpty: "暂无提示词内容",
  guidancePreviewTitle: "当前注入内容预览",
+ guidanceLines: "行",
+ guidanceChars: "字符",
+ guidanceDirty: "有未保存的修改",
 
  statusEnabled: "已启用",
  statusActive: "生效中",

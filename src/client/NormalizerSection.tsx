@@ -116,11 +116,85 @@ function SearchIcon(): React.ReactElement {
   );
 }
 
+function RefreshIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M13.5 8a5.5 5.5 0 1 1-1.8-4.1" />
+      <path d="M13.6 1.9v3.2h-3.2" />
+    </StrokeIcon>
+  );
+}
+
+function DownloadIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M8 1.8v8.4" />
+      <path d="M4.8 7.2 8 10.4l3.2-3.2" />
+      <path d="M2.2 12.6h11.6" />
+    </StrokeIcon>
+  );
+}
+
+function TrashIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M2.4 4.2h11.2" />
+      <path d="M6.2 4.2V2.6h3.6v1.6" />
+      <path d="M3.9 4.2 4.6 13a.8.8 0 0 0 .8.7h5.2a.8.8 0 0 0 .8-.7l.7-8.8" />
+    </StrokeIcon>
+  );
+}
+
+function ChevronIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M4 6.2 8 10.2l4-4" />
+    </StrokeIcon>
+  );
+}
+
+function CopyIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <rect x="5.6" y="5.6" width="8.2" height="8.2" rx="1.8" />
+      <path d="M10.4 5.6V4a1.8 1.8 0 0 0-1.8-1.8H4a1.8 1.8 0 0 0-1.8 1.8v4.6A1.8 1.8 0 0 0 4 10.4h1.6" />
+    </StrokeIcon>
+  );
+}
+
+function CheckIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M3.2 8.4 6.4 11.6l6.4-7.2" />
+    </StrokeIcon>
+  );
+}
+
+function CodeIcon(): React.ReactElement {
+  return (
+    <StrokeIcon>
+      <path d="M6 2.4 2.4 8 6 13.6" />
+      <path d="M10 2.4 13.6 8 10 13.6" />
+    </StrokeIcon>
+  );
+}
+
 /** Left-edge tone for a trace card from the record outcome. */
 function cardTone(record: { status: string; wasHealed: boolean }): string {
   if (record.status === "failed") return styles.traceCardFail;
   if (record.wasHealed) return styles.traceCardOk;
   return "";
+}
+
+/** Status-pill tone: settled failure, successful heal, or untouched pass-through. */
+function statusPillTone(record: {
+  status: string;
+  wasHealed: boolean;
+}): string {
+  if (record.status === "failed") return styles.statusPillFail;
+  if (record.wasHealed && record.status === "success")
+    return styles.statusPillOk;
+  return styles.statusPillPass;
 }
 
 function idleState(): NormalizerState {
@@ -322,22 +396,6 @@ export function NormalizerSection(
     return t("healthWarn");
   };
 
-  const dotTone = (record: { status: string; wasHealed: boolean }): string => {
-    if (record.status === "failed") return styles.statusDotFail;
-    if (record.wasHealed && record.status === "success")
-      return styles.statusDotOk;
-    return styles.statusDotPass;
-  };
-
-  const statusTone = (record: {
-    status: string;
-    wasHealed: boolean;
-  }): string => {
-    if (record.status === "failed") return styles.statusTextFail;
-    if (record.wasHealed) return "";
-    return styles.statusTextPass;
-  };
-
   const statusText = (record: {
     status: string;
     wasHealed: boolean;
@@ -468,7 +526,9 @@ export function NormalizerSection(
             className={styles.btnGhost}
             onClick={() => controller?.refresh()}
           >
-            <span className={styles.btnIcon}>⟳</span>
+            <span className={styles.btnIcon}>
+              <RefreshIcon />
+            </span>
             {t("refresh")}
           </button>
           <button
@@ -477,7 +537,9 @@ export function NormalizerSection(
             onClick={() => controller?.exportReport()}
             disabled={!hasData}
           >
-            <span className={styles.btnIcon}>⤓</span>
+            <span className={styles.btnIcon}>
+              <DownloadIcon />
+            </span>
             {t("export")}
           </button>
           <button
@@ -486,7 +548,9 @@ export function NormalizerSection(
             onClick={() => controller?.reset()}
             disabled={!hasData}
           >
-            <span className={styles.btnIcon}>⌫</span>
+            <span className={styles.btnIcon}>
+              <TrashIcon />
+            </span>
             {t("clear")}
           </button>
         </div>
@@ -557,7 +621,7 @@ export function NormalizerSection(
           </span>
           <span className={styles.kpiDesc}>{t("kpiFailedDesc")}</span>
         </div>
-        <div className={styles.kpiCard}>
+        <div className={`${styles.kpiCard} ${styles.kpiCardWide}`}>
           <span className={styles.kpiHead}>
             <span
               className={`${styles.kpiIcon} ${styles.kpiIconWarn}`}
@@ -685,31 +749,35 @@ export function NormalizerSection(
                             <span className={styles.badgeTool}>
                               {record.toolName}
                             </span>
-                            <span className={styles.badgeCategory}>
-                              {formatCategory(record.category)}
-                            </span>
+                            {/* PASSTHROUGH already reads as the status pill, so
+                                the category chip would only repeat it. */}
+                            {record.category !== "PASSTHROUGH" && (
+                              <span className={styles.badgeCategory}>
+                                {formatCategory(record.category)}
+                              </span>
+                            )}
+                          </div>
+                          <div className={styles.traceSide}>
                             <span
-                              className={`${styles.statusDot} ${dotTone(record)}`}
-                            />
-                            <span
-                              className={`${styles.statusText} ${statusTone(record)}`}
+                              className={`${styles.statusPill} ${statusPillTone(record)}`}
                             >
                               {statusText(record)}
                             </span>
-                          </div>
-                          <div className={styles.traceSide}>
                             <span className={styles.timeText}>
                               {formatTime(record.time)}
                             </span>
                             <button
                               type="button"
-                              className={styles.expandBtn}
+                              className={`${styles.expandBtn} ${isExpanded ? styles.expandBtnOpen : ""}`}
                               aria-expanded={isExpanded}
                               onClick={() => toggleExpand(record.id)}
                             >
+                              <span className={styles.chevron}>
+                                <ChevronIcon />
+                              </span>
                               {isExpanded
-                                ? `▲ ${t("hideDetails")}`
-                                : `▼ ${t("diffDetails")}`}
+                                ? t("hideDetails")
+                                : t("diffDetails")}
                             </button>
                           </div>
                         </div>
@@ -724,69 +792,82 @@ export function NormalizerSection(
                                 <span>{record.normalizationSummary}</span>
                               </div>
                             )}
-                            <div className={styles.diffBlock}>
-                              <div className={styles.diffLabelRow}>
-                                <span
-                                  className={`${styles.diffLabel} ${styles.diffLabelBefore}`}
-                                >
-                                  {t("beforeInput")}
-                                </span>
-                                <button
-                                  type="button"
-                                  className={styles.copyBtn}
-                                  onClick={() =>
-                                    copyText(
-                                      `${record.id}:before`,
-                                      record.originalArgsPreview || "{}",
-                                    )
-                                  }
-                                >
-                                  {copiedKey === `${record.id}:before`
-                                    ? "✓"
-                                    : "⧉"}
-                                </button>
+                            <div className={styles.diffColumns}>
+                              <div className={styles.diffBlock}>
+                                <div className={styles.diffLabelRow}>
+                                  <span
+                                    className={`${styles.diffLabel} ${styles.diffLabelBefore}`}
+                                  >
+                                    {t("beforeInput")}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className={styles.copyBtn}
+                                    title={t("beforeInput")}
+                                    aria-label={t("beforeInput")}
+                                    onClick={() =>
+                                      copyText(
+                                        `${record.id}:before`,
+                                        record.originalArgsPreview || "{}",
+                                      )
+                                    }
+                                  >
+                                    {copiedKey === `${record.id}:before` ? (
+                                      <CheckIcon />
+                                    ) : (
+                                      <CopyIcon />
+                                    )}
+                                  </button>
+                                </div>
+                                <JsonBlock
+                                  code={record.originalArgsPreview || "{}"}
+                                  className={`${styles.codeBox} ${styles.codeBefore}`}
+                                />
                               </div>
-                              <JsonBlock
-                                code={record.originalArgsPreview || "{}"}
-                                className={`${styles.codeBox} ${styles.codeBefore}`}
-                              />
-                            </div>
-                            <div className={styles.diffBlock}>
-                              <div className={styles.diffLabelRow}>
-                                <span
-                                  className={`${styles.diffLabel} ${styles.diffLabelAfter}`}
-                                >
-                                  {t("afterInput")}
-                                </span>
-                                <button
-                                  type="button"
-                                  className={styles.copyBtn}
-                                  onClick={() =>
-                                    copyText(
-                                      `${record.id}:after`,
-                                      record.normalizedArgsPreview || "",
-                                    )
+                              <div className={styles.diffBlock}>
+                                <div className={styles.diffLabelRow}>
+                                  <span
+                                    className={`${styles.diffLabel} ${styles.diffLabelAfter}`}
+                                  >
+                                    {t("afterInput")}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className={styles.copyBtn}
+                                    title={t("afterInput")}
+                                    aria-label={t("afterInput")}
+                                    onClick={() =>
+                                      copyText(
+                                        `${record.id}:after`,
+                                        record.normalizedArgsPreview || "",
+                                      )
+                                    }
+                                  >
+                                    {copiedKey === `${record.id}:after` ? (
+                                      <CheckIcon />
+                                    ) : (
+                                      <CopyIcon />
+                                    )}
+                                  </button>
+                                </div>
+                                <JsonBlock
+                                  code={
+                                    record.normalizedArgsPreview ||
+                                    t("afterUnchanged")
                                   }
-                                >
-                                  {copiedKey === `${record.id}:after`
-                                    ? "✓"
-                                    : "⧉"}
-                                </button>
+                                  className={`${styles.codeBox} ${styles.codeAfter}`}
+                                />
                               </div>
-                              <JsonBlock
-                                code={
-                                  record.normalizedArgsPreview || "（正常放行）"
-                                }
-                                className={`${styles.codeBox} ${styles.codeAfter}`}
-                              />
                             </div>
                             {record.errorMessage && (
                               <div className={styles.errorBlock}>
-                                <span
-                                  className={`${styles.diffLabel} ${styles.diffLabelBefore}`}
-                                >
-                                  {t("errorDetail")}
-                                </span>
+                                <div className={styles.diffLabelRow}>
+                                  <span
+                                    className={`${styles.diffLabel} ${styles.diffLabelBefore}`}
+                                  >
+                                    {t("errorDetail")}
+                                  </span>
+                                </div>
                                 <pre
                                   className={`${styles.codeBox} ${styles.codeError}`}
                                 >
@@ -844,9 +925,8 @@ export function NormalizerSection(
       )}
 
       {/* TAB: rules */}
-            {/* TAB: rules */}
       {state.activeTab === "rules" && (
-        <section style={{ width: "100%" }}>
+        <section className={styles.rulesPane}>
           <div className={styles.rulesGrid}>
             {([1, 2, 3, 4, 5, 6] as const).map((n) => (
               <article key={n} className={styles.ruleCard}>
@@ -918,53 +998,77 @@ export function NormalizerSection(
               </div>
             </header>
 
-            {guidanceMsg && (
-              <div className={`${styles.guidanceEditorMsg} ${guidanceMsg.type === "error" ? styles.guidanceEditorMsgError : styles.guidanceEditorMsgOk}`}>
-                {guidanceMsg.text}
-              </div>
-            )}
+            <div className={styles.guidanceEditorBody}>
+              {guidanceMsg && (
+                <div className={`${styles.guidanceEditorMsg} ${guidanceMsg.type === "error" ? styles.guidanceEditorMsgError : styles.guidanceEditorMsgOk}`}>
+                  {guidanceMsg.text}
+                </div>
+              )}
 
-            {guidanceLoading ? (
-              <div className={styles.guidanceEditorLoading}>
-                {t("noData")}
-              </div>
-            ) : (
-              <div className={styles.guidanceEditorBody}>
-                <textarea
-                  className={styles.guidanceEditorTextarea}
-                  value={guidanceText}
-                  onChange={(e) => {
-                    setGuidanceTextLocal(e.target.value);
-                    setGuidanceDirty(true);
-                    setGuidanceMsg(null);
-                  }}
-                  placeholder={t("guidancePlaceholder")}
-                  rows={12}
-                  aria-label={t("guidanceTitle")}
-                />
-                <details className={styles.guidanceEditorPreview}>
-                  <summary className={styles.guidanceEditorPreviewSummary}>
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M6 2 2 8l4 6"/>
-                      <path d="M10 2 14 8l-4 6"/>
-                    </svg>
-                    {t("guidancePreviewTitle")}
-                  </summary>
-                  <div className={styles.guidanceEditorPreviewCode}>{(guidanceText || t("guidanceEmpty")).split('\n').map((line, i) => {
-  // Simple markdown-like: detect headings, bold, etc.
-  let content = line;
-  let cls = "";
-  if (line.startsWith('## ')) {
-    cls = "guidancePreviewHeading";
-    content = line.slice(3);
-  } else if (line.startsWith('- ')) {
-    cls = "guidancePreviewListItem";
-  }
-  return <div key={i} className={styles[cls] || styles.guidancePreviewLine}>{content || "\u00A0"}</div>;
-})}</div>
-                </details>
-              </div>
-            )}
+              {guidanceLoading ? (
+                <div className={styles.guidanceEditorLoading}>
+                  {t("noData")}
+                </div>
+              ) : (
+                <>
+                  <textarea
+                    className={styles.guidanceEditorTextarea}
+                    value={guidanceText}
+                    onChange={(e) => {
+                      setGuidanceTextLocal(e.target.value);
+                      setGuidanceDirty(true);
+                      setGuidanceMsg(null);
+                    }}
+                    placeholder={t("guidancePlaceholder")}
+                    rows={12}
+                    spellCheck={false}
+                    aria-label={t("guidanceTitle")}
+                  />
+                  <div className={styles.guidanceEditorFooter}>
+                    <span className={styles.guidanceEditorCount}>
+                      {guidanceText.split("\n").length} {t("guidanceLines")} ·{" "}
+                      {guidanceText.length} {t("guidanceChars")}
+                    </span>
+                    {guidanceDirty && (
+                      <span className={styles.guidanceEditorDirty}>
+                        {t("guidanceDirty")}
+                      </span>
+                    )}
+                  </div>
+                  <details className={styles.guidanceEditorPreview}>
+                    <summary className={styles.guidanceEditorPreviewSummary}>
+                      <CodeIcon />
+                      {t("guidancePreviewTitle")}
+                    </summary>
+                    <div className={styles.guidanceEditorPreviewCode}>
+                      {(guidanceText || t("guidanceEmpty"))
+                        .split("\n")
+                        .map((line, i) => {
+                          // Minimal markdown-ish rendering: headings and list items.
+                          let content = line;
+                          let cls = "";
+                          if (line.startsWith("## ")) {
+                            cls = "guidancePreviewHeading";
+                            content = line.slice(3);
+                          } else if (line.startsWith("- ")) {
+                            cls = "guidancePreviewListItem";
+                          }
+                          return (
+                            <div
+                              key={i}
+                              className={
+                                styles[cls] || styles.guidancePreviewLine
+                              }
+                            >
+                              {content || "\u00A0"}
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </details>
+                </>
+              )}
+            </div>
           </section>
         </section>
       )}

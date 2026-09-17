@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-09-17
+
+### Fixed
+
+- **`自愈规则与健康度` 页整块样式失效**: `.ruleTag` 的 `font-weight` 缺了取值、分号与收尾 `}`，浏览器遂把其后所有内容折进这条非法声明，从 `.ruleTag` 往后的规则**全部被静默丢弃**——提示词编辑区因此退回浏览器默认宽度、图标与标题竖排堆叠、预览区失去样式。该缺陷自 v0.4.x 起存在，构建与运行均无任何报错。
+- **构建期拒绝会被浏览器丢弃的样式**: 新增 `scripts/css-guard.mjs`，在 CSS-module 处理器加载时校验括号配平、规则不得嵌套在声明块内、禁止未终止声明；命中即**构建失败并打印行号**。以 v0.5.1 的样式表回放，守卫准确指认 `line 932: unterminated declaration "font-weight"` 与 `line 925: unclosed block`（`.ruleTag`）。
+
+### Changed
+
+- **看板视觉重做**: 建立单一本地尺度（卡 16 / 内层 12 / 控件 10 / 胶囊 999 圆角，统一边框与间距变量），修正此前的结构性问题——hero 因 `justify-content: space-between` 把副标题挤到操作按钮下方、`保存修改` 按钮误用 `label-primary` 令牌作底色导致禁用态不可读、`guidanceEditorMsg`/`kpiMeterFill` 等既有类从未被渲染、`.healthCard` 的 `border-left` 被简写覆盖。KPI 五卡改为「2+2+整行」布局消除孤格；执行记录卡改为工具徽章 + 状态药丸（此前跟随标题变宽而漂移），参数对比改为真正的双列网格，全部 `⟳ ⤓ ⌫ ▼ ✓ ⧉` 文本字形替换为 16px 描边 SVG 图标；新增窄面板响应式折行与 `prefers-reduced-motion` 支持。
+- **失败记录的 After 栏不再自称「正常放行」**: 未做修改的失败调用现显示「（未做修改）」，避免与同卡的失败状态自相矛盾。
+
 ## [0.5.1] - 2026-09-17
 
 ### Fixed
