@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apply } from "../src/index.ts";
+import { getTopErrorsText, refreshTopErrors } from "../src/prompt.ts";
 import { ToolNormalizerTracker } from "../src/tracker.ts";
 
 const tracker = ToolNormalizerTracker.getInstance();
@@ -885,5 +886,62 @@ describe("prompt guidance placement", () => {
         (call[0] as { name: string }).name === "tool-normalizer:top-errors",
     );
     expect(topErrors?.[0]).toMatchObject({ order: 395 });
+  });
+});
+
+describe("recorded events stay serializable", () => {
+  it("keeps a live agent reference out of the persisted record", async () => {
+    const ctx = createMockContext();
+    apply(ctx as any, {});
+
+    // A real host agent is a live object graph; the back-reference models what
+    // made JSON.stringify throw on the record and silently dropped every event.
+    const agent: Record<string, unknown> = {
+      session: { header: { cwd: "/workspace" }, events: [] },
+    };
+    agent["self"] = agent;
+
+    const exec = {
+      name: "bash",
+      arguments: { command: "pwd" },
+      callId: "c-agent",
+      rootCallId: "c-agent",
+      token: "tok",
+      agent,
+      signal: new AbortController().signal,
+    };
+    const next = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "failed" }],
+      isError: true,
+      error: { code: "BOOM", message: "failed" },
+    });
+
+    await ctx.runWaterfall("tools/execute", exec, next);
+
+    const [event] = tracker.getSnapshot().recentRecords;
+    expect(event).toBeDefined();
+    expect(event!.toolName).toBe("bash");
+    expect(event).not.toHaveProperty("agent");
+    // The dashboard feeds this snapshot through JSON.stringify.
+    expect(() => JSON.stringify(tracker.getSnapshot())).not.toThrow();
+  });
+
+  it("reports real failure counts instead of total call volume", () => {
+    refreshTopErrors({
+      getAggregate: () => ({
+        failuresByTool: { bash: 3 },
+        failuresByCategory: { PASSTHROUGH: 4, FS_OBSERVED: 2 },
+        passThroughFailed: 4,
+        totalIntercepted: 999,
+      }),
+    });
+
+    const text = getTopErrorsText();
+    expect(text).toContain("bash: 3 failed calls");
+    expect(text).toContain("FS_OBSERVED: 2 occurrences");
+    // Total intercepted volume is not a failure count and must never be reported as one.
+    expect(text).not.toContain("999");
+    // PASSTHROUGH is already covered by the unrecovered-error line.
+    expect(text).not.toContain("PASSTHROUGH:");
   });
 });

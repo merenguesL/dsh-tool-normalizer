@@ -576,6 +576,11 @@ export function apply(ctx: any, userConfig: Config = {}): void {
    * `tools/post-execute` policy cannot skew them. The wrapper-observed
    * outcome travels alongside only for the no-`tools/result` fallback, which
    * has nothing better to report.
+   *
+   * Every field is persisted verbatim into the JSONL detail log, so it must
+   * stay JSON-serializable. The live agent is a reference the token meter
+   * needs, not diagnostic data: it rides on {@link StashedHeal} and never
+   * enters a record.
    */
   interface PendingHeal {
     id: string;
@@ -586,7 +591,6 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     originalArgsPreview: string;
     normalizedArgsPreview?: string;
     normalizationSummary?: string;
-    agent: unknown;
   }
 
   interface StashedOutcome {
@@ -595,10 +599,11 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     tokensSaved: number;
   }
 
-  /** One stashed handoff: healing context plus the wrapper-observed outcome. */
+  /** One stashed handoff: healing context, the outcome to report, and the agent the meter measures. */
   interface StashedHeal {
     pending: PendingHeal;
     outcome: StashedOutcome;
+    agent: unknown;
   }
 
   /** Bounded handoff from wrapper to observer, keyed by call id. */
@@ -626,11 +631,13 @@ export function apply(ctx: any, userConfig: Config = {}): void {
    * outcome the model actually received.
    * @param pending - Healing context stashed by the wrapper.
    * @param result - Final frozen outcome for this call.
+   * @param agent - Live agent the token meter measures; never persisted.
    * @returns The event to record.
    */
   function buildRecord(
     pending: PendingHeal,
     result: ToolExecutionResult,
+    agent: unknown,
   ): Parameters<typeof tracker.record>[0] {
     const ok = !result.isError;
     return {
@@ -640,7 +647,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       tokensSaved: pending.wasHealed && ok
         ? measureTokensSaved(
             readTokenMeter(ctx),
-            pending.agent,
+            agent,
             avoidedRoundTrips(pending.category),
           )
         : 0,
@@ -651,6 +658,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
     callId: string | undefined,
     pending: PendingHeal,
     outcome: StashedOutcome,
+    agent: unknown,
   ): void {
     if (callId === undefined || resultFallback) {
       // Without an identity the observer cannot correlate; record inline.
@@ -668,7 +676,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
       const oldest = pendingHeals.keys().next();
       if (!oldest.done) pendingHeals.delete(oldest.value);
     }
-    pendingHeals.set(callId, { pending, outcome });
+    pendingHeals.set(callId, { pending, outcome, agent });
     // Lazily watch for hosts that predate `tools/result`: the interval only
     // exists while an unconfirmed handoff is outstanding.
     if (!resultHookConfirmed && fallbackTimer === undefined) {
@@ -943,7 +951,6 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         normalizedArgsPreview: normalizedPreview,
         normalizationSummary:
           changes.length > 0 ? changes.join("；") : undefined,
-        agent: exec.agent,
       });
 
       // 1. Normalize `run_code` arguments (handle command -> code, missing description, etc.)
@@ -1120,6 +1127,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
               errorMessage: resultErrorText(result),
               tokensSaved: savedTokens(true, !result.isError, "UNKNOWN_TOOL"),
             },
+            exec.agent,
           );
           return result;
         }
@@ -1236,6 +1244,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
             errorMessage: resultErrorText(result),
             tokensSaved: savedTokens(wasHealed, !result.isError, healCategory),
           },
+          exec.agent,
         );
         return result;
       } catch (error: unknown) {
@@ -1270,15 +1279,21 @@ export function apply(ctx: any, userConfig: Config = {}): void {
                 "UNKNOWN_TOOL",
               ),
             },
+            exec.agent,
           );
           return bridgedResult;
         }
 
-        stashPending(exec.callId, currentPending(true), {
-          status: "failed",
-          errorMessage: errorText(error) ?? String(error),
-          tokensSaved: 0,
-        });
+        stashPending(
+          exec.callId,
+          currentPending(true),
+          {
+            status: "failed",
+            errorMessage: errorText(error) ?? String(error),
+            tokensSaved: 0,
+          },
+          exec.agent,
+        );
         throw error;
       }
     },
@@ -1320,7 +1335,7 @@ export function apply(ctx: any, userConfig: Config = {}): void {
         void restoreReady.then(() => {
           try {
             if (stashed !== undefined) {
-              recordEvent(buildRecord(stashed.pending, result));
+              recordEvent(buildRecord(stashed.pending, result, stashed.agent));
               return;
             }
             if (alreadyInline) return;

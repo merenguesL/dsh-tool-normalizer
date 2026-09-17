@@ -60,6 +60,12 @@ interface PersistedAggregate {
   estimatedTokensSaved: number;
   byTool: Record<string, number>;
   byCategory: Record<string, number>;
+  /**
+   * Failure-only breakdowns. Optional so a summary written before they
+   * existed still loads: its counters stay valid and these start empty.
+   */
+  failuresByTool?: Record<string, number>;
+  failuresByCategory?: Record<string, number>;
 }
 
 const CATEGORIES = new Set<NormalizerRecord["category"]>(
@@ -169,6 +175,8 @@ function accumulateRecord(
   >,
   byTool: Record<string, number>,
   byCategory: Record<string, number>,
+  failuresByTool: Record<string, number>,
+  failuresByCategory: Record<string, number>,
   record: NormalizerRecord,
 ): void {
   totals.totalIntercepted++;
@@ -180,6 +188,11 @@ function accumulateRecord(
 
   byTool[record.toolName] = (byTool[record.toolName] ?? 0) + 1;
   byCategory[record.category] = (byCategory[record.category] ?? 0) + 1;
+  if (record.status === "failed") {
+    failuresByTool[record.toolName] = (failuresByTool[record.toolName] ?? 0) + 1;
+    failuresByCategory[record.category] =
+      (failuresByCategory[record.category] ?? 0) + 1;
+  }
 }
 
 function parseEventLog(raw: string): NormalizerRecord[] {
@@ -223,9 +236,22 @@ function aggregateFromRecords(
     string,
     number
   >;
+  const failuresByTool: Record<string, number> = Object.create(
+    null,
+  ) as Record<string, number>;
+  const failuresByCategory: Record<string, number> = Object.create(
+    null,
+  ) as Record<string, number>;
   let estimatedTokensSaved = 0;
   for (const record of records) {
-    accumulateRecord(totals, byTool, byCategory, record);
+    accumulateRecord(
+      totals,
+      byTool,
+      byCategory,
+      failuresByTool,
+      failuresByCategory,
+      record,
+    );
     estimatedTokensSaved += record.tokensSaved ?? 0;
   }
   return {
@@ -235,6 +261,8 @@ function aggregateFromRecords(
     estimatedTokensSaved,
     byTool,
     byCategory,
+    failuresByTool,
+    failuresByCategory,
   };
 }
 
@@ -250,6 +278,8 @@ function snapshotAggregate(stats: NormalizerAggregate): PersistedAggregate {
     estimatedTokensSaved: stats.estimatedTokensSaved,
     byTool: { ...stats.byTool },
     byCategory: { ...stats.byCategory },
+    failuresByTool: { ...stats.failuresByTool },
+    failuresByCategory: { ...stats.failuresByCategory },
   };
 }
 
@@ -308,6 +338,8 @@ export async function restoreFromLog(
     healingSuccessRate: healingRate(aggregate),
     byTool: safeCountMap(aggregate.byTool),
     byCategory: safeCountMap(aggregate.byCategory),
+    failuresByTool: safeCountMap(aggregate.failuresByTool),
+    failuresByCategory: safeCountMap(aggregate.failuresByCategory),
     recentRecords,
   };
   tracker.restore(stats);
@@ -397,6 +429,39 @@ export async function compactLogIfOversized(): Promise<void> {
 let detailedAppends = 0;
 
 /**
+ * Serialize one diagnostic event into a JSONL line body.
+ *
+ * The record is checked by serialization rather than trusted, because a live
+ * reference that reached a record must not discard the event or abort the
+ * caller's summary write. The fallback pass drops cycles and functions, so a
+ * diagnostic field that cannot be represented costs only that field.
+ * @param record - Event emitted by the interceptor.
+ * @returns One JSON line body, or undefined when nothing can be represented.
+ */
+function serializeRecordLine(record: NormalizerRecord): string | undefined {
+  try {
+    return JSON.stringify(record);
+  } catch {
+    // Not representable as-is; retry with the lossy replacer below.
+  }
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(record, (_key: string, value: unknown) => {
+      if (typeof value === "function") return undefined;
+      if (typeof value === "bigint") return String(value);
+      if (typeof value === "object" && value !== null) {
+        if (seen.has(value)) return undefined;
+        seen.add(value);
+      }
+      return value;
+    });
+  } catch {
+    // Nothing about this event is representable; the caller still writes counters.
+    return undefined;
+  }
+}
+
+/**
  * Append one event and publish a compact aggregate snapshot. Successful
  * untouched calls are skipped from JSONL unless explicitly enabled.
  * @param record - Event emitted by the interceptor.
@@ -412,13 +477,15 @@ export function appendEvent(
   const detailed =
     options.persistPassthrough === true || isDiagnosticRecord(record);
   if (detailed) {
-    const line = `${JSON.stringify(record)}\n`;
-    enqueue(async () => {
-      await mkdir(dirname(statsLogPath()), { recursive: true });
-      await appendFile(statsLogPath(), line, "utf-8");
-    });
-    if (++detailedAppends % LOG_SIZE_CHECK_EVERY_APPENDS === 0) {
-      enqueue(() => compactLogIfOversized());
+    const line = serializeRecordLine(record);
+    if (line !== undefined) {
+      enqueue(async () => {
+        await mkdir(dirname(statsLogPath()), { recursive: true });
+        await appendFile(statsLogPath(), `${line}\n`, "utf-8");
+      });
+      if (++detailedAppends % LOG_SIZE_CHECK_EVERY_APPENDS === 0) {
+        enqueue(() => compactLogIfOversized());
+      }
     }
   }
   // Every outcome coalesces into one debounced summary write per second: the

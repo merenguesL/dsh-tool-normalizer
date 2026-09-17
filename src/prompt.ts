@@ -74,12 +74,18 @@ export function getTopErrorsText(): string {
 /**
  * Refresh the top-errors snapshot from the tracker. Called at session start
  * and optionally on explicit user request. Never called mid-turn.
+ *
+ * Reads the failure-only breakdowns, never call volume: `byTool`/`byCategory`
+ * count every intercepted call, so reporting them as failures told the model
+ * that a tool with N calls had N failed calls. The figures summarise the
+ * restored history, which is what the session-start snapshot can honestly
+ * describe.
  * @param tracker - Aggregate source exposing the counter snapshot.
  */
 export function refreshTopErrors(tracker: {
   getAggregate(): {
-    byTool: Record<string, number>;
-    byCategory: Record<string, number>;
+    failuresByTool: Record<string, number>;
+    failuresByCategory: Record<string, number>;
     passThroughFailed: number;
     totalIntercepted: number;
   }
@@ -89,16 +95,17 @@ export function refreshTopErrors(tracker: {
     currentTopErrorsText = ''
     return
   }
-  // Collect high-frequency tool failures (tools with >1 recorded failure)
-  const toolFailures: string[] = Object.entries(stats.byCategory)
-    .filter(([cat]) => cat !== 'PASSTHROUGH' && cat !== 'READ_ARGS')
+  // Categories with a recurring real failure. PASSTHROUGH is excluded because
+  // `Unrecovered errors` below already reports exactly those.
+  const toolFailures: string[] = Object.entries(stats.failuresByCategory)
+    .filter(([cat]) => cat !== 'PASSTHROUGH')
     .map(([cat, count]) => ({ cat, count }))
     .filter(e => e.count >= 2)
     .sort((a, b) => b.count - a.count)
     .slice(0, 3)
     .map(e => `  - ${e.cat}: ${e.count} occurrences`)
 
-  const toolCallErrors: string[] = Object.entries(stats.byTool)
+  const toolCallErrors: string[] = Object.entries(stats.failuresByTool)
     .filter(([tool]) => tool !== 'run_code')
     .map(([tool, count]) => ({ tool, count }))
     .filter(e => e.count >= 2)
@@ -108,11 +115,11 @@ export function refreshTopErrors(tracker: {
 
   const parts: string[] = []
   if (toolCallErrors.length > 0) {
-    parts.push('High-frequency tool failures in this session:')
+    parts.push('Recurring tool failures (recorded history):')
     parts.push(...toolCallErrors)
   }
   if (toolFailures.length > 0) {
-    parts.push('High-frequency error categories:')
+    parts.push('Recurring error categories (recorded history):')
     parts.push(...toolFailures)
   }
   if (stats.passThroughFailed > 0) {

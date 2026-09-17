@@ -33,6 +33,8 @@ function emptyStats(): NormalizerStats {
     healingSuccessRate: 0,
     byTool: {},
     byCategory: {},
+    failuresByTool: {},
+    failuresByCategory: {},
     recentRecords: [],
   };
 }

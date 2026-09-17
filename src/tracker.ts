@@ -78,6 +78,14 @@ export interface NormalizerStats {
   byTool: Record<string, number>;
   /** Per-category event totals; the UI ranks and renders these directly. */
   byCategory: Record<string, number>;
+  /**
+   * Per-tool failed-call totals. Distinct from {@link byTool}, which counts
+   * every intercepted call: diagnostic text that claims "N failed calls" must
+   * read these, never raw call volume.
+   */
+  failuresByTool: Record<string, number>;
+  /** Per-category failed-call totals, from settled failures only. */
+  failuresByCategory: Record<string, number>;
   recentRecords: NormalizerRecord[];
 }
 
@@ -95,6 +103,8 @@ export type NormalizerAggregate = Pick<
   | "estimatedTokensSaved"
   | "byTool"
   | "byCategory"
+  | "failuresByTool"
+  | "failuresByCategory"
 >;
 
 /**
@@ -128,6 +138,13 @@ export class ToolNormalizerTracker {
     string,
     number
   >;
+  private failuresByTool: Record<string, number> = Object.create(null) as Record<
+    string,
+    number
+  >;
+  private failuresByCategory: Record<string, number> = Object.create(
+    null,
+  ) as Record<string, number>;
   private records: NormalizerRecord[] = [];
   /** Dashboard transport window; the JSONL log holds the unbounded history. */
   private maxRecords = 1000;
@@ -161,6 +178,15 @@ export class ToolNormalizerTracker {
     // Category breakdown
     this.byCategory[record.category] =
       (this.byCategory[record.category] ?? 0) + 1;
+
+    // Real failures only: the injected diagnostics and dashboard rank these,
+    // so a normalization attempt that succeeded must not inflate them.
+    if (record.status === "failed") {
+      this.failuresByTool[record.toolName] =
+        (this.failuresByTool[record.toolName] ?? 0) + 1;
+      this.failuresByCategory[record.category] =
+        (this.failuresByCategory[record.category] ?? 0) + 1;
+    }
 
     // Token-savings accrues with the healed, successful event itself; the
     // per-record figure is measured at dispatch time by the token-meter.
@@ -207,6 +233,14 @@ export class ToolNormalizerTracker {
       Object.create(null),
       stats.byCategory,
     ) as Record<string, number>;
+    this.failuresByTool = Object.assign(
+      Object.create(null),
+      stats.failuresByTool,
+    ) as Record<string, number>;
+    this.failuresByCategory = Object.assign(
+      Object.create(null),
+      stats.failuresByCategory,
+    ) as Record<string, number>;
     this.records = [...stats.recentRecords]
       .filter((record) => this.persistPassthrough || isDiagnosticRecord(record))
       .sort((a, b) => b.time - a.time)
@@ -240,6 +274,8 @@ export class ToolNormalizerTracker {
       estimatedTokensSaved: this.estimatedTokensSaved,
       byTool: { ...this.byTool },
       byCategory: { ...this.byCategory },
+      failuresByTool: { ...this.failuresByTool },
+      failuresByCategory: { ...this.failuresByCategory },
     };
   }
 
@@ -262,6 +298,8 @@ export class ToolNormalizerTracker {
     this.estimatedTokensSaved = 0;
     this.byTool = Object.create(null) as Record<string, number>;
     this.byCategory = Object.create(null) as Record<string, number>;
+    this.failuresByTool = Object.create(null) as Record<string, number>;
+    this.failuresByCategory = Object.create(null) as Record<string, number>;
     this.records = [];
   }
 }

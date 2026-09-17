@@ -136,6 +136,8 @@ function idleState(): NormalizerState {
       healingSuccessRate: 0,
       byTool: {},
       byCategory: {},
+      failuresByTool: {},
+      failuresByCategory: {},
       recentRecords: [],
     },
     activeTab: "live",

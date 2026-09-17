@@ -137,4 +137,35 @@ describe('ToolNormalizerTracker', () => {
 
     expect(tracker.getSnapshot().estimatedTokensSaved).toBe(0)
   })
+
+  it('counts only settled failures in the per-tool and per-category failure maps', () => {
+    tracker.record({
+      id: 'healed',
+      time: 1000,
+      toolName: 'run_code',
+      category: 'INNER_DESC',
+      wasHealed: true,
+      originalArgsPreview: '{}',
+      status: 'success',
+    })
+    tracker.record({
+      id: 'failed',
+      time: 2000,
+      toolName: 'edit',
+      category: 'PASSTHROUGH',
+      wasHealed: false,
+      originalArgsPreview: '{}',
+      status: 'failed',
+      errorMessage: 'old_string was not found',
+    })
+
+    const snap = tracker.getSnapshot()
+    // A successful heal is an attempt, never a failure.
+    expect(snap.byTool['run_code']).toBe(1)
+    expect(snap.byCategory['INNER_DESC']).toBe(1)
+    expect(snap.failuresByTool['run_code']).toBeUndefined()
+    expect(snap.failuresByCategory['INNER_DESC']).toBeUndefined()
+    expect(snap.failuresByTool['edit']).toBe(1)
+    expect(snap.failuresByCategory['PASSTHROUGH']).toBe(1)
+  })
 })

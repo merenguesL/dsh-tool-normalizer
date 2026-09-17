@@ -120,6 +120,72 @@ describe('stats-log persistence policy', () => {
     await flushStatsLog()
   })
 
+  it('writes a rotated-safe detail line and keeps counters flowing when a record carries a live reference', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-tool-normalizer-'))
+    process.env['DSH_HOME'] = home
+    delete process.env['VITEST']
+    delete process.env['NODE_ENV']
+
+    const tracker = new ToolNormalizerTracker()
+    // Simulates the pre-fix path: a live host reference reached the record.
+    const live: Record<string, unknown> = { session: { id: 's' } }
+    live['self'] = live
+    const event = record({
+      id: 'live-ref',
+      status: 'failed',
+      errorMessage: 'boom',
+    }) as unknown as Record<string, unknown>
+    event['agent'] = live
+    const poisoned = event as unknown as NormalizerRecord
+
+    tracker.record(poisoned)
+    appendEvent(poisoned, tracker.getAggregate())
+    await flushStatsLog()
+
+    // The counters must survive even when the detail line cannot round-trip verbatim.
+    const summary = JSON.parse(await readFile(statsSummaryPath(), 'utf8')) as {
+      passThroughFailed: number
+      failuresByTool: Record<string, number>
+    }
+    expect(summary.passThroughFailed).toBe(1)
+    expect(summary.failuresByTool['read']).toBe(1)
+
+    const lines = (await readFile(statsLogPath(), 'utf8')).trim().split('\n')
+    expect(lines).toHaveLength(1)
+    expect(JSON.parse(lines[0]!).id).toBe('live-ref')
+
+    await clearLog()
+    await flushStatsLog()
+  })
+
+  it('round-trips failure breakdowns across restarts', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'dsh-tool-normalizer-'))
+    process.env['DSH_HOME'] = home
+    delete process.env['VITEST']
+    delete process.env['NODE_ENV']
+
+    const tracker = new ToolNormalizerTracker()
+    const event = record({
+      id: 'failure-1',
+      toolName: 'edit',
+      category: 'FS_OBSERVED',
+      wasHealed: true,
+      status: 'failed',
+      errorMessage: 'stale',
+    })
+    tracker.record(event)
+    appendEvent(event, tracker.getAggregate())
+    await flushStatsLog()
+
+    const revived = new ToolNormalizerTracker()
+    await restoreFromLog(revived)
+    expect(revived.getSnapshot().failuresByTool['edit']).toBe(1)
+    expect(revived.getSnapshot().failuresByCategory['FS_OBSERVED']).toBe(1)
+
+    await clearLog()
+    await flushStatsLog()
+  })
+
   it('compacts an oversized detail log to its newest valid slice', async () => {
     const home = await mkdtemp(join(tmpdir(), 'dsh-tool-normalizer-'))
     process.env['DSH_HOME'] = home

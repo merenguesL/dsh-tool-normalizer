@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-17
+
+### Fixed
+
+- **明细日志自 0.5.0 起全线丢失**: `PendingHeal` 新增的 `agent` 字段被 `buildRecord` 展开进记录，而宿主 agent 是含循环引用的活动对象，`appendEvent` 首行的 `JSON.stringify(record)` 必然抛 `Converting circular structure to JSON`。抛出点位于 `enqueue` 与 `scheduleSummary` 之前，异常又被 `tools/result` 观察者的 `try/catch` 静默吞掉——**失败与自愈的明细行再未写入**，该次 summary 写入同时被跳过。健康直通按设计跳过序列化并仍改写 summary，后续直通又会用 `tracker.getAggregate()` 写回含失败数的新快照，因此计数器照常增长、表面毫无异常，故障被完全掩盖。agent 引用现只保留在 `StashedHeal`（token meter 需要它，且该层从不落盘），记录本身不含任何活动引用。
+- **`appendEvent` 不再因单条记录报废整体统计**: 序列化改经 `serializeRecordLine`，先按原样序列化，失败时用带 `WeakSet` 的降级 replacer 丢弃循环与函数；即便彻底不可序列化也只跳过该明细行，summary 必定照常写入。
+- **Dashboard `/plugin-api/tool-normalizer/stats` 返回空响应**: 计数环里带着 agent 引用，`JSON.stringify(tracker.getSnapshot())` 抛错导致该路由挂掉（`/guidance` 同路径注册正常返回 200，可作对照）。记录不含活动引用后恢复。
+
+### Changed
+
+- **注入模型的高频错误改为真实失败计数**: 原实现把 `byTool`/`byCategory`（**全部**拦截次数，其中绝大多数是成功自愈）当作失败数，向模型宣称 `bash: 13038 failed calls` 之类的前提，且标题写 “in this session” 实为全局累计。新增 `failuresByTool`/`failuresByCategory`（仅在 `status === "failed"` 时累加），诊断文本改读二者，标题改为 “recorded history”。
+
 ## [0.5.0] - 2026-09-14
 
 ### Added
